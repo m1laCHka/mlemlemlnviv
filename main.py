@@ -24,7 +24,11 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 DB_PATH = os.getenv("DATABASE_PATH", "bot.db")
-CHAT_ID = 4358492509
+CHAT_ID = os.getenv("CHAT_ID")  # Может быть None
+
+if not BOT_TOKEN:
+    logging.error("BOT_TOKEN не установлен!")
+    exit(1)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -60,130 +64,141 @@ class FamilyNameState(StatesGroup):
     waiting_for_name = State()
 
 async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            custom_nick TEXT DEFAULT NULL,
-            custom_emoji TEXT DEFAULT '',
-            gender TEXT DEFAULT NULL,
-            coins INTEGER DEFAULT 1000,
-            stars INTEGER DEFAULT 10,
-            is_vip INTEGER DEFAULT 0,
-            vip_until TEXT DEFAULT NULL,
-            is_hidden INTEGER DEFAULT 0,
-            insurance INTEGER DEFAULT 0,
-            family_id INTEGER DEFAULT NULL,
-            family_name TEXT DEFAULT NULL,
-            spouse_id INTEGER DEFAULT NULL,
-            divorce_until TEXT DEFAULT NULL,
-            daily_stars_transferred INTEGER DEFAULT 0,
-            last_transfer_date TEXT DEFAULT NULL,
-            last_prize_date TEXT DEFAULT NULL,
-            wins INTEGER DEFAULT 0,
-            losses INTEGER DEFAULT 0,
-            total_games INTEGER DEFAULT 0,
-            total_coins_won INTEGER DEFAULT 0,
-            daily_net_win INTEGER DEFAULT 0,
-            streak_days INTEGER DEFAULT 0,
-            last_active_date TEXT DEFAULT NULL,
-            last_game_result TEXT DEFAULT 'Нет',
-            top3_family_count INTEGER DEFAULT 0,
-            roulette_games INTEGER DEFAULT 0,
-            roulette_wins INTEGER DEFAULT 0,
-            duel_games INTEGER DEFAULT 0,
-            duel_wins INTEGER DEFAULT 0,
-            cat_games INTEGER DEFAULT 0,
-            cat_wins INTEGER DEFAULT 0,
-            casino_games INTEGER DEFAULT 0,
-            casino_wins INTEGER DEFAULT 0,
-            quests_completed INTEGER DEFAULT 0,
-            quest1 INTEGER DEFAULT 0,
-            quest2 INTEGER DEFAULT 0,
-            quest3 INTEGER DEFAULT 0,
-            quest4 INTEGER DEFAULT 0,
-            quest5 INTEGER DEFAULT 0,
-            quest1_done INTEGER DEFAULT 0,
-            quest2_done INTEGER DEFAULT 0,
-            quest3_done INTEGER DEFAULT 0,
-            quest4_done INTEGER DEFAULT 0,
-            quest5_done INTEGER DEFAULT 0,
-            quest_bonus_claimed INTEGER DEFAULT 0,
-            tournament_wins INTEGER DEFAULT 0,
-            tournament_fee_paid INTEGER DEFAULT 0
-        )
-        """)
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                custom_nick TEXT DEFAULT NULL,
+                custom_emoji TEXT DEFAULT '',
+                gender TEXT DEFAULT NULL,
+                coins INTEGER DEFAULT 1000,
+                stars INTEGER DEFAULT 10,
+                is_vip INTEGER DEFAULT 0,
+                vip_until TEXT DEFAULT NULL,
+                is_hidden INTEGER DEFAULT 0,
+                insurance INTEGER DEFAULT 0,
+                family_id INTEGER DEFAULT NULL,
+                family_name TEXT DEFAULT NULL,
+                spouse_id INTEGER DEFAULT NULL,
+                divorce_until TEXT DEFAULT NULL,
+                daily_stars_transferred INTEGER DEFAULT 0,
+                last_transfer_date TEXT DEFAULT NULL,
+                last_prize_date TEXT DEFAULT NULL,
+                wins INTEGER DEFAULT 0,
+                losses INTEGER DEFAULT 0,
+                total_games INTEGER DEFAULT 0,
+                total_coins_won INTEGER DEFAULT 0,
+                daily_net_win INTEGER DEFAULT 0,
+                streak_days INTEGER DEFAULT 0,
+                last_active_date TEXT DEFAULT NULL,
+                last_game_result TEXT DEFAULT 'Нет',
+                top3_family_count INTEGER DEFAULT 0,
+                roulette_games INTEGER DEFAULT 0,
+                roulette_wins INTEGER DEFAULT 0,
+                duel_games INTEGER DEFAULT 0,
+                duel_wins INTEGER DEFAULT 0,
+                cat_games INTEGER DEFAULT 0,
+                cat_wins INTEGER DEFAULT 0,
+                casino_games INTEGER DEFAULT 0,
+                casino_wins INTEGER DEFAULT 0,
+                quests_completed INTEGER DEFAULT 0,
+                quest1 INTEGER DEFAULT 0,
+                quest2 INTEGER DEFAULT 0,
+                quest3 INTEGER DEFAULT 0,
+                quest4 INTEGER DEFAULT 0,
+                quest5 INTEGER DEFAULT 0,
+                quest1_done INTEGER DEFAULT 0,
+                quest2_done INTEGER DEFAULT 0,
+                quest3_done INTEGER DEFAULT 0,
+                quest4_done INTEGER DEFAULT 0,
+                quest5_done INTEGER DEFAULT 0,
+                quest_bonus_claimed INTEGER DEFAULT 0,
+                tournament_wins INTEGER DEFAULT 0,
+                tournament_fee_paid INTEGER DEFAULT 0
+            )
+            """)
 
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS families (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user1_id INTEGER,
-            user2_id INTEGER,
-            name TEXT DEFAULT NULL,
-            score INTEGER DEFAULT 0,
-            created_at TEXT,
-            top1_count INTEGER DEFAULT 0,
-            last_anniversary_month INTEGER DEFAULT 0
-        )
-        """)
+            await db.execute("""
+            CREATE TABLE IF NOT EXISTS families (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user1_id INTEGER,
+                user2_id INTEGER,
+                name TEXT DEFAULT NULL,
+                score INTEGER DEFAULT 0,
+                created_at TEXT,
+                top1_count INTEGER DEFAULT 0,
+                last_anniversary_month INTEGER DEFAULT 0
+            )
+            """)
 
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS children (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            family_id INTEGER,
-            child_id INTEGER
-        )
-        """)
+            await db.execute("""
+            CREATE TABLE IF NOT EXISTS children (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                family_id INTEGER,
+                child_id INTEGER
+            )
+            """)
 
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS achievements (
-            user_id INTEGER,
-            ach_id TEXT,
-            PRIMARY KEY (user_id, ach_id)
-        )
-        """)
+            await db.execute("""
+            CREATE TABLE IF NOT EXISTS achievements (
+                user_id INTEGER,
+                ach_id TEXT,
+                PRIMARY KEY (user_id, ach_id)
+            )
+            """)
 
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS promos (
-            code TEXT PRIMARY KEY,
-            stars INTEGER DEFAULT 0,
-            coins INTEGER DEFAULT 0,
-            vip_days INTEGER DEFAULT 0,
-            max_uses INTEGER DEFAULT 1,
-            uses INTEGER DEFAULT 0
-        )
-        """)
+            await db.execute("""
+            CREATE TABLE IF NOT EXISTS promos (
+                code TEXT PRIMARY KEY,
+                stars INTEGER DEFAULT 0,
+                coins INTEGER DEFAULT 0,
+                vip_days INTEGER DEFAULT 0,
+                max_uses INTEGER DEFAULT 1,
+                uses INTEGER DEFAULT 0
+            )
+            """)
 
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS user_promos (
-            user_id INTEGER,
-            code TEXT,
-            PRIMARY KEY (user_id, code)
-        )
-        """)
+            await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_promos (
+                user_id INTEGER,
+                code TEXT,
+                PRIMARY KEY (user_id, code)
+            )
+            """)
 
-        await db.commit()
+            await db.commit()
+            logging.info("База данных инициализирована успешно")
+    except Exception as e:
+        logging.error(f"Ошибка при инициализации БД: {e}")
+        raise
 
 async def get_or_create_user(user_id: int, username: Optional[str]) -> dict:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            user = await cursor.fetchone()
-            today = datetime.date.today().isoformat()
-            if not user:
-                await db.execute(
-                    "INSERT INTO users (user_id, username, last_active_date) VALUES (?, ?, ?)",
-                    (user_id, username or f"Игрок_{user_id}", today)
-                )
-                await db.commit()
-                async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as c2:
-                    user = await c2.fetchone()
-            else:
-                if username and user['username'] != username:
-                    await db.execute("UPDATE users SET username = ? WHERE user_id = ?", (username, user_id))
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                user = await cursor.fetchone()
+                today = datetime.date.today().isoformat()
+                if not user:
+                    await db.execute(
+                        "INSERT INTO users (user_id, username, last_active_date) VALUES (?, ?, ?)",
+                        (user_id, username or f"Игрок_{user_id}", today)
+                    )
                     await db.commit()
-            return dict(user)
+                    async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as c2:
+                        user = await c2.fetchone()
+                else:
+                    if username and user['username'] != username:
+                        await db.execute("UPDATE users SET username = ? WHERE user_id = ?", (username, user_id))
+                        await db.commit()
+                        async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as c2:
+                            user = await c2.fetchone()
+                return dict(user)
+    except Exception as e:
+        logging.error(f"Ошибка в get_or_create_user для {user_id}: {e}")
+        return {"user_id": user_id, "coins": 1000, "stars": 10}
 
 # ---------------------------------------------------------
 # РАНГИ, ТИТУЛЫ, АЧИВКИ
@@ -201,57 +216,63 @@ def calculate_rank(wins: int, total: int) -> str:
 
 async def get_user_titles(user: dict) -> list:
     titles = []
-    if user['roulette_games'] >= 100: titles.append("🃏 Картёжник")
-    if user['duel_wins'] >= 100: titles.append("🤠 Шериф")
-    if user['cat_games'] >= 100: titles.append("🐱 Котолюб")
-    if user['coins'] >= 50000: titles.append("💰 Миллионер")
-    if user['stars'] >= 200: titles.append("⭐ Коллекционер")
-    if user['casino_wins'] >= 50: titles.append("🎰 Казино-король")
-    if user['family_id']:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT created_at FROM families WHERE id = ?", (user['family_id'],)) as c:
-                fam = await c.fetchone()
-                if fam:
-                    created = datetime.date.fromisoformat(fam['created_at'])
-                    if (datetime.date.today() - created).days >= 365:
-                        titles.append("👑 Золотая семья")
+    try:
+        if user.get('roulette_games', 0) >= 100: titles.append("🃏 Картёжник")
+        if user.get('duel_wins', 0) >= 100: titles.append("🤠 Шериф")
+        if user.get('cat_games', 0) >= 100: titles.append("🐱 Котолюб")
+        if user.get('coins', 0) >= 50000: titles.append("💰 Миллионер")
+        if user.get('stars', 0) >= 200: titles.append("⭐ Коллекционер")
+        if user.get('casino_wins', 0) >= 50: titles.append("🎰 Казино-король")
+        if user.get('family_id'):
+            async with aiosqlite.connect(DB_PATH) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute("SELECT created_at FROM families WHERE id = ?", (user['family_id'],)) as c:
+                    fam = await c.fetchone()
+                    if fam:
+                        created = datetime.date.fromisoformat(fam['created_at'])
+                        if (datetime.date.today() - created).days >= 365:
+                            titles.append("👑 Золотая семья")
+    except Exception as e:
+        logging.error(f"Ошибка в get_user_titles: {e}")
     return titles
 
 async def check_achievements(user_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as c:
-            u = await c.fetchone()
-        if not u: return
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as c:
+                u = await c.fetchone()
+            if not u: return
 
-        async with db.execute("SELECT ach_id FROM achievements WHERE user_id = ?", (user_id,)) as c:
-            unlocked = {r['ach_id'] for r in await c.fetchall()}
+            async with db.execute("SELECT ach_id FROM achievements WHERE user_id = ?", (user_id,)) as c:
+                unlocked = {r['ach_id'] for r in await c.fetchall()}
 
-        ach_data = [
-            ("first_step", u['total_games'] >= 1, 10, 0, "🆕 Первый шаг"),
-            ("first_win", u['wins'] >= 1, 20, 1, "🎯 Первый выигрыш"),
-            ("wins_10", u['wins'] >= 10, 50, 2, "💪 10 побед"),
-            ("wins_50", u['wins'] >= 50, 100, 5, "🏅 50 побед"),
-            ("wins_100", u['wins'] >= 100, 200, 10, "👑 100 побед"),
-            ("rouletto", u['roulette_wins'] >= 10, 50, 2, "🎰 Рулеточник"),
-            ("duelist", u['duel_wins'] >= 10, 50, 2, "🤠 Дуэлянт"),
-            ("catlover", u['cat_wins'] >= 10, 50, 2, "🐱 Котовод"),
-            ("rich", u['coins'] >= 10000, 200, 5, "💰 Богач"),
-            ("starry", u['stars'] >= 50, 0, 10, "⭐ Звёздный"),
-            ("games_1000", u['total_games'] >= 1000, 1000, 20, "👾 1000 игр"),
-            ("in_love", u['family_id'] is not None, 0, 5, "❤️ Любовь"),
-        ]
+            ach_data = [
+                ("first_step", u['total_games'] >= 1, 10, 0, "🆕 Первый шаг"),
+                ("first_win", u['wins'] >= 1, 20, 1, "🎯 Первый выигрыш"),
+                ("wins_10", u['wins'] >= 10, 50, 2, "💪 10 побед"),
+                ("wins_50", u['wins'] >= 50, 100, 5, "🏅 50 побед"),
+                ("wins_100", u['wins'] >= 100, 200, 10, "👑 100 побед"),
+                ("rouletto", u['roulette_wins'] >= 10, 50, 2, "🎰 Рулеточник"),
+                ("duelist", u['duel_wins'] >= 10, 50, 2, "🤠 Дуэлянт"),
+                ("catlover", u['cat_wins'] >= 10, 50, 2, "🐱 Котовод"),
+                ("rich", u['coins'] >= 10000, 200, 5, "💰 Богач"),
+                ("starry", u['stars'] >= 50, 0, 10, "⭐ Звёздный"),
+                ("games_1000", u['total_games'] >= 1000, 1000, 20, "👾 1000 игр"),
+                ("in_love", u['family_id'] is not None, 0, 5, "❤️ Любовь"),
+            ]
 
-        for ach_id, cond, r_coins, r_stars, title in ach_data:
-            if cond and ach_id not in unlocked:
-                await db.execute("INSERT INTO achievements (user_id, ach_id) VALUES (?, ?)", (user_id, ach_id))
-                await db.execute("UPDATE users SET coins = coins + ?, stars = stars + ? WHERE user_id = ?", (r_coins, r_stars, user_id))
-                await db.commit()
-                try:
-                    await bot.send_message(user_id, f"🏆 АЧИВКА! {title}\n+{r_coins}💰, +{r_stars}⭐")
-                except Exception:
-                    pass
+            for ach_id, cond, r_coins, r_stars, title in ach_data:
+                if cond and ach_id not in unlocked:
+                    await db.execute("INSERT INTO achievements (user_id, ach_id) VALUES (?, ?)", (user_id, ach_id))
+                    await db.execute("UPDATE users SET coins = coins + ?, stars = stars + ? WHERE user_id = ?", (r_coins, r_stars, user_id))
+                    await db.commit()
+                    try:
+                        await bot.send_message(user_id, f"🏆 АЧИВКА! {title}\n+{r_coins}💰, +{r_stars}⭐")
+                    except Exception:
+                        pass
+    except Exception as e:
+        logging.error(f"Ошибка в check_achievements для {user_id}: {e}")
 
 # ============================================================
 # КВЕСТЫ
@@ -265,56 +286,68 @@ QUESTS = [
 ]
 
 async def update_quest_progress(user_id: int, quest_id: int, progress: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(f"UPDATE users SET quest{quest_id} = quest{quest_id} + ? WHERE user_id = ?", (progress, user_id))
-        await db.commit()
-    await check_quest_completion(user_id, quest_id)
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(f"UPDATE users SET quest{quest_id} = quest{quest_id} + ? WHERE user_id = ?", (progress, user_id))
+            await db.commit()
+        await check_quest_completion(user_id, quest_id)
+    except Exception as e:
+        logging.error(f"Ошибка в update_quest_progress: {e}")
 
 async def check_quest_completion(user_id: int, quest_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(f"SELECT quest{quest_id}, quest{quest_id}_done FROM users WHERE user_id = ?", (user_id,)) as c:
-            row = await c.fetchone()
-        if not row: return
-        progress = row[0]
-        done = row[1]
-        if done: return
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(f"SELECT quest{quest_id}, quest{quest_id}_done FROM users WHERE user_id = ?", (user_id,)) as c:
+                row = await c.fetchone()
+            if not row: return
+            progress = row[f"quest{quest_id}"]
+            done = row[f"quest{quest_id}_done"]
+            if done: return
 
-        target = QUESTS[quest_id - 1]["target"]
-        if progress >= target:
-            await db.execute(f"UPDATE users SET quest{quest_id}_done = 1 WHERE user_id = ?", (user_id,))
-            coins = QUESTS[quest_id - 1]["coins"]
-            stars = QUESTS[quest_id - 1]["stars"]
-            await db.execute("UPDATE users SET coins = coins + ?, stars = stars + ? WHERE user_id = ?", (coins, stars, user_id))
-            await db.commit()
-            try:
-                await bot.send_message(user_id, f"✅ КВЕСТ ВЫПОЛНЕН!\n{QUESTS[quest_id - 1]['name']}\nНаграда: +{coins}💰, +{stars}⭐")
-            except Exception:
-                pass
-            await check_all_quests_bonus(user_id)
+            target = QUESTS[quest_id - 1]["target"]
+            if progress >= target:
+                await db.execute(f"UPDATE users SET quest{quest_id}_done = 1 WHERE user_id = ?", (user_id,))
+                coins = QUESTS[quest_id - 1]["coins"]
+                stars = QUESTS[quest_id - 1]["stars"]
+                await db.execute("UPDATE users SET coins = coins + ?, stars = stars + ? WHERE user_id = ?", (coins, stars, user_id))
+                await db.commit()
+                try:
+                    await bot.send_message(user_id, f"✅ КВЕСТ ВЫПОЛНЕН!\n{QUESTS[quest_id - 1]['name']}\nНаграда: +{coins}💰, +{stars}⭐")
+                except Exception:
+                    pass
+                await check_all_quests_bonus(user_id)
+    except Exception as e:
+        logging.error(f"Ошибка в check_quest_completion: {e}")
 
 async def check_all_quests_bonus(user_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT quest1_done, quest2_done, quest3_done, quest4_done, quest5_done, quest_bonus_claimed FROM users WHERE user_id = ?", (user_id,)) as c:
-            row = await c.fetchone()
-        if not row: return
-        if row["quest_bonus_claimed"]: return
-        if all([row["quest1_done"], row["quest2_done"], row["quest3_done"], row["quest4_done"], row["quest5_done"]]):
-            await db.execute("UPDATE users SET stars = stars + 10, quest_bonus_claimed = 1 WHERE user_id = ?", (user_id,))
-            await db.commit()
-            try:
-                await bot.send_message(user_id, "🎁 БОНУС ЗА ВСЕ КВЕСТЫ! +10⭐")
-            except Exception:
-                pass
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT quest1_done, quest2_done, quest3_done, quest4_done, quest5_done, quest_bonus_claimed FROM users WHERE user_id = ?", (user_id,)) as c:
+                row = await c.fetchone()
+            if not row: return
+            if row["quest_bonus_claimed"]: return
+            if all([row["quest1_done"], row["quest2_done"], row["quest3_done"], row["quest4_done"], row["quest5_done"]]):
+                await db.execute("UPDATE users SET stars = stars + 10, quest_bonus_claimed = 1 WHERE user_id = ?", (user_id,))
+                await db.commit()
+                try:
+                    await bot.send_message(user_id, "🎁 БОНУС ЗА ВСЕ КВЕСТЫ! +10⭐")
+                except Exception:
+                    pass
+    except Exception as e:
+        logging.error(f"Ошибка в check_all_quests_bonus: {e}")
 
 # ============================================================
 # ТУРНИР (АВТОМАТИЧЕСКИЙ)
 # ============================================================
 async def add_tournament_win(user_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET tournament_wins = tournament_wins + 1 WHERE user_id = ?", (user_id,))
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE users SET tournament_wins = tournament_wins + 1 WHERE user_id = ?", (user_id,))
+            await db.commit()
+    except Exception as e:
+        logging.error(f"Ошибка в add_tournament_win: {e}")
 
 async def get_tournament_end_time() -> datetime.datetime:
     now = datetime.datetime.now()
@@ -334,106 +367,123 @@ async def get_tournament_time_left() -> str:
 
 async def check_tournament_end():
     while True:
-        now = datetime.datetime.now()
-        end_time = await get_tournament_end_time()
-        if now >= end_time:
-            await finish_tournament()
-            await asyncio.sleep(3600)
-        else:
-            await asyncio.sleep(600)
+        try:
+            now = datetime.datetime.now()
+            end_time = await get_tournament_end_time()
+            if now >= end_time:
+                await finish_tournament()
+                await asyncio.sleep(3600)
+            else:
+                await asyncio.sleep(600)
+        except Exception as e:
+            logging.error(f"Ошибка в check_tournament_end: {e}")
+            await asyncio.sleep(300)
 
 async def finish_tournament():
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT user_id, tournament_wins FROM users WHERE tournament_wins > 0 ORDER BY tournament_wins DESC LIMIT 3") as c:
-            winners = await c.fetchall()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT user_id, tournament_wins FROM users WHERE tournament_wins > 0 ORDER BY tournament_wins DESC LIMIT 3") as c:
+                winners = await c.fetchall()
 
-        if not winners:
-            return
+            if not winners:
+                return
 
-        async with db.execute("SELECT COUNT(*) FROM users WHERE tournament_fee_paid = 1") as c:
-            count = await c.fetchone()
-        participants = count[0] if count else 0
-        prize_pool = 500 + participants * 10
+            async with db.execute("SELECT COUNT(*) FROM users WHERE tournament_fee_paid = 1") as c:
+                count = await c.fetchone()
+            participants = count[0] if count else 0
+            prize_pool = 500 + participants * 10
 
-        rewards = [int(prize_pool * 0.6), int(prize_pool * 0.3), int(prize_pool * 0.1)]
-        
-        for idx, winner in enumerate(winners):
-            if idx >= 3: break
-            stars = rewards[idx]
-            await db.execute("UPDATE users SET stars = stars + ? WHERE user_id = ?", (stars, winner['user_id']))
-            await db.execute("UPDATE users SET tournament_wins = 0, tournament_fee_paid = 0 WHERE user_id = ?", (winner['user_id'],))
+            rewards = [int(prize_pool * 0.6), int(prize_pool * 0.3), int(prize_pool * 0.1)]
+            
+            for idx, winner in enumerate(winners):
+                if idx >= 3: break
+                stars = rewards[idx]
+                await db.execute("UPDATE users SET stars = stars + ? WHERE user_id = ?", (stars, winner['user_id']))
+                await db.execute("UPDATE users SET tournament_wins = 0, tournament_fee_paid = 0 WHERE user_id = ?", (winner['user_id'],))
 
-        await db.commit()
+            await db.commit()
 
-        message = "🏆 **ТУРНИР ЗАВЕРШЁН!**\n\n"
-        for idx, winner in enumerate(winners):
-            if idx >= 3: break
-            user = await get_or_create_user(winner['user_id'], None)
-            name = user.get('custom_nick') or user.get('username') or f"Игрок_{winner['user_id']}"
-            message += f"{'🥇' if idx == 0 else '🥈' if idx == 1 else '🥉'} {name} — +{rewards[idx]}⭐\n"
-        
-        try:
-            await bot.send_message(CHAT_ID, message, parse_mode="Markdown")
-        except Exception:
-            pass
+            message = "🏆 **ТУРНИР ЗАВЕРШЁН!**\n\n"
+            for idx, winner in enumerate(winners):
+                if idx >= 3: break
+                user = await get_or_create_user(winner['user_id'], None)
+                name = user.get('custom_nick') or user.get('username') or f"Игрок_{winner['user_id']}"
+                message += f"{'🥇' if idx == 0 else '🥈' if idx == 1 else '🥉'} {name} — +{rewards[idx]}⭐\n"
+            
+            if CHAT_ID:
+                try:
+                    await bot.send_message(int(CHAT_ID), message, parse_mode="Markdown")
+                except Exception as e:
+                    logging.error(f"Ошибка отправки уведомления о турнире: {e}")
+    except Exception as e:
+        logging.error(f"Ошибка в finish_tournament: {e}")
 
 # ============================================================
 # АВТОРАЗДАЧА ТОПОВ
 # ============================================================
 async def daily_prize_distribution():
     while True:
-        now = datetime.datetime.now()
-        next_run = now.replace(hour=0, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
-        if now >= next_run:
-            next_run += datetime.timedelta(days=1)
-        wait_seconds = (next_run - now).total_seconds()
-        await asyncio.sleep(wait_seconds)
-        await distribute_daily_rewards()
+        try:
+            now = datetime.datetime.now()
+            next_run = now.replace(hour=0, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
+            if now >= next_run:
+                next_run += datetime.timedelta(days=1)
+            wait_seconds = (next_run - now).total_seconds()
+            await asyncio.sleep(wait_seconds)
+            await distribute_daily_rewards()
+        except Exception as e:
+            logging.error(f"Ошибка в daily_prize_distribution: {e}")
+            await asyncio.sleep(3600)
 
 async def distribute_daily_rewards():
     if not CHAT_ID:
+        logging.warning("CHAT_ID не установлен, пропускаем раздачу наград")
         return
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-
-        async with db.execute("SELECT user_id, username, custom_nick, wins FROM users ORDER BY wins DESC LIMIT 10") as c:
-            top_players = await c.fetchall()
-
-        rewards = [
-            {"stars": 25, "coins": 100},
-            {"stars": 15, "coins": 50},
-            {"stars": 10, "coins": 25}
-        ]
-
-        text_players = "🏆 ЕЖЕДНЕВНЫЙ ТОП ИГРОКОВ:\n\n"
-        for idx, player in enumerate(top_players[:3], start=1):
-            name = player['custom_nick'] or player['username'] or f"Игрок_{player['user_id']}"
-            reward = rewards[idx - 1]
-            await db.execute("UPDATE users SET stars = stars + ?, coins = coins + ? WHERE user_id = ?",
-                             (reward["stars"], reward["coins"], player['user_id']))
-            text_players += f"{'🥇' if idx == 1 else '🥈' if idx == 2 else '🥉'} {name} — +{reward['stars']}⭐ +{reward['coins']}💰\n"
-
-        async with db.execute("SELECT id, name, user1_id, user2_id, score FROM families ORDER BY score DESC LIMIT 10") as c:
-            top_families = await c.fetchall()
-
-        family_rewards = [30, 20, 10]
-        text_families = "\n💍 ТОП СЕМЕЙ:\n\n"
-        for idx, fam in enumerate(top_families[:3], start=1):
-            name = fam['name'] or f"Семья #{fam['id']}"
-            stars = family_rewards[idx - 1]
-            await db.execute("UPDATE users SET stars = stars + ? WHERE user_id IN (?, ?)",
-                             (stars, fam['user1_id'], fam['user2_id']))
-            text_families += f"{'🥇' if idx == 1 else '🥈' if idx == 2 else '🥉'} {name} — +{stars}⭐\n"
-
-        await db.commit()
-
-    message = text_players + text_families
     try:
-        await bot.send_message(CHAT_ID, message, parse_mode="Markdown")
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+
+            async with db.execute("SELECT user_id, username, custom_nick, wins FROM users ORDER BY wins DESC LIMIT 10") as c:
+                top_players = await c.fetchall()
+
+            rewards = [
+                {"stars": 25, "coins": 100},
+                {"stars": 15, "coins": 50},
+                {"stars": 10, "coins": 25}
+            ]
+
+            text_players = "🏆 ЕЖЕДНЕВНЫЙ ТОП ИГРОКОВ:\n\n"
+            for idx, player in enumerate(top_players[:3], start=1):
+                name = player['custom_nick'] or player['username'] or f"Игрок_{player['user_id']}"
+                reward = rewards[idx - 1]
+                await db.execute("UPDATE users SET stars = stars + ?, coins = coins + ? WHERE user_id = ?",
+                                 (reward["stars"], reward["coins"], player['user_id']))
+                text_players += f"{'🥇' if idx == 1 else '🥈' if idx == 2 else '🥉'} {name} — +{reward['stars']}⭐ +{reward['coins']}💰\n"
+
+            async with db.execute("SELECT id, name, user1_id, user2_id, score FROM families ORDER BY score DESC LIMIT 10") as c:
+                top_families = await c.fetchall()
+
+            family_rewards = [30, 20, 10]
+            text_families = "\n💍 ТОП СЕМЕЙ:\n\n"
+            for idx, fam in enumerate(top_families[:3], start=1):
+                name = fam['name'] or f"Семья #{fam['id']}"
+                stars = family_rewards[idx - 1]
+                await db.execute("UPDATE users SET stars = stars + ? WHERE user_id IN (?, ?)",
+                                 (stars, fam['user1_id'], fam['user2_id']))
+                await db.execute("UPDATE families SET top1_count = top1_count + 1 WHERE id = ?", (fam['id'],))
+                text_families += f"{'🥇' if idx == 1 else '🥈' if idx == 2 else '🥉'} {name} — +{stars}⭐\n"
+
+            await db.commit()
+
+        message = text_players + text_families
+        try:
+            await bot.send_message(int(CHAT_ID), message, parse_mode="Markdown")
+        except Exception as e:
+            logging.error(f"Ошибка отправки уведомления: {e}")
     except Exception as e:
-        logging.error(f"Ошибка отправки уведомления: {e}")
+        logging.error(f"Ошибка в distribute_daily_rewards: {e}")
 
 # ---------------------------------------------------------
 # ПОМОЩЬ
@@ -480,12 +530,14 @@ HELP_TEXT = """🎮 ПОЛНЫЙ СПИСОК ВОЗМОЖНОСТЕЙ БОТА
 # ВЫБОР ПОЛА
 # ============================================================
 @router.message(Command("start"))
-async def cmd_gender_choice(message: Message):
+async def cmd_start(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    if user.get('gender'):
+    if not user.get('gender'):
+        await cmd_gender_choice(message)
+    else:
         await cmd_help(message)
-        return
 
+async def cmd_gender_choice(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👨 Мужчина", callback_data="gender_male"),
          InlineKeyboardButton(text="👩 Женщина", callback_data="gender_female")]
@@ -494,14 +546,17 @@ async def cmd_gender_choice(message: Message):
 
 @router.callback_query(F.data.startswith("gender_"))
 async def process_gender(callback: CallbackQuery):
-    gender = callback.data.split("_")[1]
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET gender = ? WHERE user_id = ?", (gender, callback.from_user.id))
-        await db.commit()
-    await callback.message.edit_text(f"✅ Пол выбран: {'👨 Мужчина' if gender == 'male' else '👩 Женщина'}")
-    await callback.answer()
+    try:
+        gender = callback.data.split("_")[1]
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE users SET gender = ? WHERE user_id = ?", (gender, callback.from_user.id))
+            await db.commit()
+        await callback.message.edit_text(f"✅ Пол выбран: {'👨 Мужчина' if gender == 'male' else '👩 Женщина'}")
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка в process_gender: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
 
-@router.message(Command("start"))
 @router.message(F.text.lower().in_(["помощь", "help", "❓ помощь"]))
 async def cmd_help(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
@@ -568,49 +623,54 @@ async def cmd_roulette(message: Message):
     await message.answer(f"✅ Ставка {uname} — {bet_amount}💰 на {bet_type}! ({len(roul['bets'])}/10)", parse_mode="Markdown")
 
 async def run_roulette_timer(chat_id: int):
-    await asyncio.sleep(60)
-    if chat_id not in active_roulettes: return
+    try:
+        await asyncio.sleep(60)
+        if chat_id not in active_roulettes: return
 
-    roul = active_roulettes.pop(chat_id)
-    bets = roul["bets"]
+        roul = active_roulettes.pop(chat_id)
+        bets = roul["bets"]
 
-    winning_number = random.randint(0, 30)
-    is_zero = (winning_number == 0)
-    is_even = (winning_number % 2 == 0) if not is_zero else None
-    is_red = (winning_number % 2 != 0) if not is_zero else None
+        winning_number = random.randint(0, 30)
+        is_zero = (winning_number == 0)
+        is_even = (winning_number % 2 == 0) if not is_zero else None
+        is_red = (winning_number % 2 != 0) if not is_zero else None
 
-    color_str = "🟢 0" if is_zero else ("🔴 " + str(winning_number) if is_red else "⚫ " + str(winning_number))
-    res_text = f"🎰 РУЛЕТКА! Выпало: {color_str}\n\n"
+        color_str = "🟢 0" if is_zero else ("🔴 " + str(winning_number) if is_red else "⚫ " + str(winning_number))
+        res_text = f"🎰 РУЛЕТКА! Выпало: {color_str}\n\n"
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        for b in bets:
-            uid, uname, b_type, amount = b["user_id"], b["username"], b["type"], b["amount"]
-            won, mult = False, 0
+        async with aiosqlite.connect(DB_PATH) as db:
+            for b in bets:
+                uid, uname, b_type, amount = b["user_id"], b["username"], b["type"], b["amount"]
+                won, mult = False, 0
 
-            if b_type in ["красное", "red"] and is_red: won, mult = True, 2
-            elif b_type in ["черное", "black"] and (not is_red and not is_zero): won, mult = True, 2
-            elif b_type in ["чет", "even"] and is_even: won, mult = True, 2
-            elif b_type in ["нечет", "odd"] and (not is_even and not is_zero): won, mult = True, 2
-            elif b_type == "0" and is_zero: won, mult = True, 100
-            elif b_type.isdigit() and int(b_type) == winning_number: won, mult = True, 50
+                if b_type in ["красное", "red"] and is_red: won, mult = True, 2
+                elif b_type in ["черное", "black"] and (not is_red and not is_zero): won, mult = True, 2
+                elif b_type in ["чет", "even"] and is_even: won, mult = True, 2
+                elif b_type in ["нечет", "odd"] and (not is_even and not is_zero): won, mult = True, 2
+                elif b_type == "0" and is_zero: won, mult = True, 100
+                elif b_type.isdigit() and int(b_type) == winning_number: won, mult = True, 50
 
-            if won:
-                win_coins = amount * mult
-                await db.execute("""UPDATE users SET coins = coins + ?, wins = wins + 1, total_games = total_games + 1,
-                    roulette_games = roulette_games + 1, roulette_wins = roulette_wins + 1, total_coins_won = total_coins_won + ?
-                    WHERE user_id = ?""", (win_coins, win_coins, uid))
-                await add_tournament_win(uid)
-                res_text += f"✅ {uname}: +{win_coins}💰\n"
-            else:
-                refund = (amount // 2) if b["insurance"] == 1 else 0
-                if refund > 0:
-                    await db.execute("UPDATE users SET coins = coins + ?, insurance = 0 WHERE user_id = ?", (refund, uid))
+                if won:
+                    win_coins = amount * mult
+                    await db.execute("""UPDATE users SET coins = coins + ?, wins = wins + 1, total_games = total_games + 1,
+                        roulette_games = roulette_games + 1, roulette_wins = roulette_wins + 1, total_coins_won = total_coins_won + ?
+                        WHERE user_id = ?""", (win_coins, win_coins, uid))
+                    await add_tournament_win(uid)
+                    await update_quest_progress(uid, 1, 1)
+                    res_text += f"✅ {uname}: +{win_coins}💰\n"
+                else:
+                    refund = (amount // 2) if b["insurance"] == 1 else 0
+                    if refund > 0:
+                        await db.execute("UPDATE users SET coins = coins + ?, insurance = 0 WHERE user_id = ?", (refund, uid))
 
-                await db.execute("UPDATE users SET losses = losses + 1, total_games = total_games + 1, roulette_games = roulette_games + 1 WHERE user_id = ?", (uid,))
-                res_text += f"❌ {uname}: -{amount}💰 {'(страховка)' if refund else ''}\n"
+                    await db.execute("UPDATE users SET losses = losses + 1, total_games = total_games + 1, roulette_games = roulette_games + 1 WHERE user_id = ?", (uid,))
+                    await update_quest_progress(uid, 1, 1)
+                    res_text += f"❌ {uname}: -{amount}💰 {'(страховка)' if refund else ''}\n"
 
-        await db.commit()
-    await bot.send_message(chat_id, res_text, parse_mode="Markdown")
+            await db.commit()
+        await bot.send_message(chat_id, res_text, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Ошибка в run_roulette_timer: {e}")
 
 # ============================================================
 # ДУЭЛЬ (ТОЛЬКО В ЧАТАХ)
@@ -625,9 +685,15 @@ async def cmd_duel(message: Message):
     if len(args) < 2:
         await message.answer("🤠 Формат: дуэль 100", parse_mode="Markdown")
         return
+    
     try:
         amount = int(args[1])
     except ValueError:
+        await message.answer("❌ Сумма должна быть числом!")
+        return
+
+    if amount < 10:
+        await message.answer("❌ Минимальная ставка: 10💰!")
         return
 
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
@@ -647,7 +713,8 @@ async def cmd_duel(message: Message):
         "chat_id": message.chat.id,
         "turn": None,
         "p1_hp": 100,
-        "p2_hp": 100
+        "p2_hp": 100,
+        "timer_task": asyncio.create_task(duel_timeout(duel_id))
     }
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -656,11 +723,22 @@ async def cmd_duel(message: Message):
     ])
     await message.answer(f"🤠 {uname} вызывает на дуэль! Ставка: {amount}💰", reply_markup=kb, parse_mode="Markdown")
 
+async def duel_timeout(duel_id: str):
+    await asyncio.sleep(60)
+    if duel_id in active_duels:
+        duel = active_duels.pop(duel_id)
+        try:
+            await bot.send_message(duel["chat_id"], "⏰ Время на принятие дуэли истекло!")
+        except Exception:
+            pass
+
 @router.callback_query(F.data.startswith("cancel_duel_"))
 async def cancel_duel(callback: CallbackQuery):
     duel_id = callback.data.replace("cancel_duel_", "")
     if duel_id in active_duels:
-        del active_duels[duel_id]
+        duel = active_duels.pop(duel_id)
+        if "timer_task" in duel:
+            duel["timer_task"].cancel()
     await callback.message.edit_text("❌ Дуэль отменена.")
     await callback.answer()
 
@@ -682,6 +760,9 @@ async def process_accept_duel(callback: CallbackQuery):
         await callback.answer("Недостаточно монет!", show_alert=True)
         return
 
+    if "timer_task" in duel:
+        duel["timer_task"].cancel()
+
     p2_name = p2_user['custom_nick'] or p2_user['username'] or callback.from_user.first_name
     duel["p2"] = p2_id
     duel["p2_name"] = p2_name
@@ -700,7 +781,9 @@ async def process_accept_duel(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("shoot_"))
 async def process_shoot(callback: CallbackQuery):
     duel_id = callback.data.replace("shoot_", "")
-    if duel_id not in active_duels: return
+    if duel_id not in active_duels: 
+        await callback.answer("Дуэль завершена!", show_alert=True)
+        return
 
     duel = active_duels[duel_id]
     shooter_id = callback.from_user.id
@@ -733,6 +816,7 @@ async def process_shoot(callback: CallbackQuery):
             await db.commit()
         
         await add_tournament_win(winner_id)
+        await update_quest_progress(winner_id, 2, 1)
 
         del active_duels[duel_id]
         await callback.message.edit_text(f"💀 {shooter_name} убивает {target_name}!\n🏆 {shooter_name} +{win_amt}💰", parse_mode="Markdown")
@@ -764,7 +848,14 @@ async def cmd_cats(message: Message):
         return
 
     args = message.text.split()
-    bet = int(args[1]) if len(args) > 1 and args[1].isdigit() else 100
+    if len(args) < 2 or not args[1].isdigit():
+        bet = 100
+    else:
+        bet = int(args[1])
+
+    if bet < 10:
+        await message.answer("❌ Минимальная ставка: 10💰!")
+        return
 
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     if user['coins'] < bet:
@@ -787,7 +878,8 @@ async def cmd_cats(message: Message):
         "active": True,
         "chat_id": chat_id,
         "starter_id": user['user_id'],
-        "starter_bet": bet
+        "starter_bet": bet,
+        "message_id": None
     }
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -795,42 +887,50 @@ async def cmd_cats(message: Message):
     ])
 
     text = f"🐱 Считай жёлтых 🐈 (чёрные 🐈‍⬛ не считаем!)\nСтавка: {bet}💰\n\n" + "".join(cats_list)
-    await message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    msg = await message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    active_cats[chat_id]["message_id"] = msg.message_id
 
 @router.callback_query(F.data.startswith("cancel_cats_"))
 async def cancel_cats(callback: CallbackQuery):
-    chat_id = int(callback.data.split("_")[2])
-    
-    if chat_id not in active_cats:
-        await callback.answer("❌ Игра уже завершена!", show_alert=True)
-        return
+    try:
+        chat_id = int(callback.data.split("_")[2])
+        
+        if chat_id not in active_cats:
+            await callback.answer("❌ Игра уже завершена!", show_alert=True)
+            return
 
-    game = active_cats[chat_id]
-    if not game["active"]:
-        await callback.answer("❌ Игра уже завершена!", show_alert=True)
-        return
+        game = active_cats[chat_id]
+        if not game["active"]:
+            await callback.answer("❌ Игра уже завершена!", show_alert=True)
+            return
 
-    starter_id = game.get("starter_id")
-    starter_bet = game.get("starter_bet", 0)
-    
-    if starter_id and starter_bet > 0:
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (starter_bet, starter_id))
-            await db.commit()
+        starter_id = game.get("starter_id")
+        starter_bet = game.get("starter_bet", 0)
+        
+        if starter_id and starter_bet > 0:
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (starter_bet, starter_id))
+                await db.commit()
 
-    del active_cats[chat_id]
-    
-    await callback.message.edit_text("❌ Игра отменена! Ставка возвращена.")
-    await callback.answer()
+        del active_cats[chat_id]
+        
+        await callback.message.edit_text("❌ Игра отменена! Ставка возвращена.")
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка в cancel_cats: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
 
 @router.message(F.text.isdigit())
 async def process_cats_answer(message: Message):
     chat_id = message.chat.id
-    if chat_id not in active_cats or not active_cats[chat_id]["active"]: return
+    if chat_id not in active_cats or not active_cats[chat_id]["active"]: 
+        return
 
     game = active_cats[chat_id]
     user_id = message.from_user.id
-    if game["attempts"].get(user_id, 0) >= 3: return
+    if game["attempts"].get(user_id, 0) >= 3: 
+        await message.answer("❌ У тебя больше нет попыток!")
+        return
 
     game["attempts"][user_id] = game["attempts"].get(user_id, 0) + 1
     val = int(message.text)
@@ -838,6 +938,17 @@ async def process_cats_answer(message: Message):
     if val == game["count"]:
         game["active"] = False
         win_pot = int(game["pot"] * 1.8)
+        
+        try:
+            # Удаляем клавиатуру
+            if game.get("message_id"):
+                try:
+                    await bot.edit_message_reply_markup(chat_id, game["message_id"], reply_markup=None)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute("""UPDATE users SET coins = coins + ?, wins = wins + 1, total_games = total_games + 1,
                 cat_games = cat_games + 1, cat_wins = cat_wins + 1 WHERE user_id = ?""", (win_pot, user_id))
@@ -847,7 +958,9 @@ async def process_cats_answer(message: Message):
             await db.commit()
         
         await add_tournament_win(user_id)
+        await update_quest_progress(user_id, 4, 1)
         await message.answer(f"🎉 Правильно! Жёлтых котиков было {val}.\n+{win_pot}💰", parse_mode="Markdown")
+        del active_cats[chat_id]
 
 # ============================================================
 # КАЗИНО
@@ -860,27 +973,31 @@ async def cmd_casino(message: Message):
         return
 
     rand = random.random()
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET stars = stars - 25, casino_games = casino_games + 1 WHERE user_id = ?", (user['user_id'],))
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE users SET stars = stars - 25, casino_games = casino_games + 1 WHERE user_id = ?", (user['user_id'],))
 
-        if rand < 0.40:
-            win_c = random.randint(50, 3000)
-            await db.execute("UPDATE users SET coins = coins + ?, wins = wins + 1 WHERE user_id = ?", (win_c, user['user_id']))
-            res = f"💰 +{win_c} монет!"
-        elif rand < 0.70:
-            days = random.randint(4, 10)
-            await db.execute("UPDATE users SET is_vip = 1, wins = wins + 1 WHERE user_id = ?", (user['user_id'],))
-            res = f"👑 VIP на {days} дней!"
-        elif rand < 0.99:
-            win_s = random.randint(10, 75)
-            await db.execute("UPDATE users SET stars = stars + ?, wins = wins + 1 WHERE user_id = ?", (win_s, user['user_id']))
-            res = f"⭐ +{win_s} звёзд!"
-        else:
-            await db.execute("UPDATE users SET coins = coins + 5000, stars = stars + 50, is_vip = 1, wins = wins + 1 WHERE user_id = ?", (user['user_id'],))
-            res = "🔥 ДЖЕКПОТ! 5000💰 + 50⭐ + VIP!"
+            if rand < 0.40:
+                win_c = random.randint(50, 3000)
+                await db.execute("UPDATE users SET coins = coins + ?, wins = wins + 1, casino_wins = casino_wins + 1 WHERE user_id = ?", (win_c, user['user_id']))
+                res = f"💰 +{win_c} монет!"
+            elif rand < 0.70:
+                days = random.randint(4, 10)
+                await db.execute("UPDATE users SET is_vip = 1, wins = wins + 1, casino_wins = casino_wins + 1 WHERE user_id = ?", (user['user_id'],))
+                res = f"👑 VIP на {days} дней!"
+            elif rand < 0.99:
+                win_s = random.randint(10, 75)
+                await db.execute("UPDATE users SET stars = stars + ?, wins = wins + 1, casino_wins = casino_wins + 1 WHERE user_id = ?", (win_s, user['user_id']))
+                res = f"⭐ +{win_s} звёзд!"
+            else:
+                await db.execute("UPDATE users SET coins = coins + 5000, stars = stars + 50, is_vip = 1, wins = wins + 1, casino_wins = casino_wins + 1 WHERE user_id = ?", (user['user_id'],))
+                res = "🔥 ДЖЕКПОТ! 5000💰 + 50⭐ + VIP!"
 
-        await db.commit()
-    await message.answer(f"🎰 Казино (-25⭐)\n\n{res}", parse_mode="Markdown")
+            await db.commit()
+        await message.answer(f"🎰 Казино (-25⭐)\n\n{res}", parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_casino: {e}")
+        await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
 # ============================================================
 # ПРИЗ (ТОЛЬКО В ЛС)
@@ -903,34 +1020,39 @@ async def cmd_prize(message: Message):
 
 @router.callback_query(F.data.startswith("chest_"))
 async def process_chest(callback: CallbackQuery):
-    user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
-    today = datetime.date.today().isoformat()
-    if user['last_prize_date'] == today:
-        await callback.answer("Уже сегодня!", show_alert=True)
-        return
+    try:
+        user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
+        today = datetime.date.today().isoformat()
+        if user['last_prize_date'] == today:
+            await callback.answer("Уже сегодня!", show_alert=True)
+            return
 
-    chosen = int(callback.data.split("_")[1])
-    rewards = []
-    for _ in range(5):
-        r = random.random()
-        if r < 0.30: rewards.append((200, 0))
-        elif r < 0.55: rewards.append((500, 0))
-        elif r < 0.75: rewards.append((800, 0))
-        elif r < 0.90: rewards.append((1000, 1))
-        else: rewards.append((1500, 5))
+        chosen = int(callback.data.split("_")[1])
+        rewards = []
+        for _ in range(5):
+            r = random.random()
+            if r < 0.30: rewards.append((200, 0))
+            elif r < 0.55: rewards.append((500, 0))
+            elif r < 0.75: rewards.append((800, 0))
+            elif r < 0.90: rewards.append((1000, 1))
+            else: rewards.append((1500, 5))
 
-    win_coins, win_stars = rewards[chosen - 1]
+        win_coins, win_stars = rewards[chosen - 1]
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET coins = coins + ?, stars = stars + ?, last_prize_date = ? WHERE user_id = ?",
-                         (win_coins, win_stars, today, callback.from_user.id))
-        await db.commit()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE users SET coins = coins + ?, stars = stars + ?, last_prize_date = ? WHERE user_id = ?",
+                             (win_coins, win_stars, today, callback.from_user.id))
+            await db.commit()
 
-    text = f"🎉 Сундук #{chosen}\n+{win_coins}💰 +{win_stars}⭐\n\nОстальные:\n"
-    for idx, (c, s) in enumerate(rewards, 1):
-        text += f"📦 #{idx}: {c}💰 {s}⭐ {'👈' if idx == chosen else ''}\n"
+        text = f"🎉 Сундук #{chosen}\n+{win_coins}💰 +{win_stars}⭐\n\nОстальные:\n"
+        for idx, (c, s) in enumerate(rewards, 1):
+            text += f"📦 #{idx}: {c}💰 {s}⭐ {'👈' if idx == chosen else ''}\n"
 
-    await callback.message.edit_text(text, parse_mode="Markdown")
+        await callback.message.edit_text(text, parse_mode="Markdown")
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка в process_chest: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
 
 # ============================================================
 # ПЕРЕВОД
@@ -949,6 +1071,10 @@ async def cmd_transfer(message: Message):
         await message.answer("❌ Сумма должна быть числом!")
         return
 
+    if amount <= 0:
+        await message.answer("❌ Сумма должна быть положительной!")
+        return
+
     sender = await get_or_create_user(message.from_user.id, message.from_user.username)
     today = datetime.date.today().isoformat()
     transferred = sender['daily_stars_transferred'] if sender['last_transfer_date'] == today else 0
@@ -961,20 +1087,24 @@ async def cmd_transfer(message: Message):
         await message.answer("❌ Недостаточно звёзд!")
         return
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM users WHERE username = ?", (target_uname,)) as c:
-            target = await c.fetchone()
-        if not target:
-            await message.answer("❌ Пользователь не найден!")
-            return
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM users WHERE username = ?", (target_uname,)) as c:
+                target = await c.fetchone()
+            if not target:
+                await message.answer("❌ Пользователь не найден!")
+                return
 
-        await db.execute("UPDATE users SET stars = stars - ?, daily_stars_transferred = ?, last_transfer_date = ? WHERE user_id = ?",
-                         (amount, transferred + amount, today, message.from_user.id))
-        await db.execute("UPDATE users SET stars = stars + ? WHERE user_id = ?", (amount, target['user_id']))
-        await db.commit()
+            await db.execute("UPDATE users SET stars = stars - ?, daily_stars_transferred = ?, last_transfer_date = ? WHERE user_id = ?",
+                             (amount, transferred + amount, today, message.from_user.id))
+            await db.execute("UPDATE users SET stars = stars + ? WHERE user_id = ?", (amount, target['user_id']))
+            await db.commit()
 
-    await message.answer(f"✅ +{amount}⭐ для @{target_uname}!")
+        await message.answer(f"✅ +{amount}⭐ для @{target_uname}!")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_transfer: {e}")
+        await message.answer("❌ Произошла ошибка при переводе.")
 
 # ============================================================
 # МАГАЗИН
@@ -1000,24 +1130,28 @@ async def cmd_shop(message: Message):
 
 @router.callback_query(F.data.startswith("buy_"))
 async def process_shop(callback: CallbackQuery):
-    user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
-    async with aiosqlite.connect(DB_PATH) as db:
-        if callback.data == "buy_vip_1" and user['stars'] >= 5:
-            await db.execute("UPDATE users SET stars = stars - 5, is_vip = 1 WHERE user_id = ?", (user['user_id'],))
-            await callback.answer("✅ VIP 1 день!", show_alert=True)
-        elif callback.data == "buy_vip_7" and user['stars'] >= 30:
-            await db.execute("UPDATE users SET stars = stars - 30, is_vip = 1 WHERE user_id = ?", (user['user_id'],))
-            await callback.answer("✅ VIP 7 дней!", show_alert=True)
-        elif callback.data == "buy_ins" and user['stars'] >= 5:
-            await db.execute("UPDATE users SET stars = stars - 5, insurance = 1 WHERE user_id = ?", (user['user_id'],))
-            await callback.answer("✅ Страховка!", show_alert=True)
-        elif callback.data == "buy_ex" and user['stars'] >= 1:
-            await db.execute("UPDATE users SET stars = stars - 1, coins = coins + 50 WHERE user_id = ?", (user['user_id'],))
-            await callback.answer("✅ +50💰!", show_alert=True)
-        else:
-            await callback.answer("❌ Недостаточно звёзд!", show_alert=True)
-            return
-        await db.commit()
+    try:
+        user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
+        async with aiosqlite.connect(DB_PATH) as db:
+            if callback.data == "buy_vip_1" and user['stars'] >= 5:
+                await db.execute("UPDATE users SET stars = stars - 5, is_vip = 1 WHERE user_id = ?", (user['user_id'],))
+                await callback.answer("✅ VIP 1 день!", show_alert=True)
+            elif callback.data == "buy_vip_7" and user['stars'] >= 30:
+                await db.execute("UPDATE users SET stars = stars - 30, is_vip = 1 WHERE user_id = ?", (user['user_id'],))
+                await callback.answer("✅ VIP 7 дней!", show_alert=True)
+            elif callback.data == "buy_ins" and user['stars'] >= 5:
+                await db.execute("UPDATE users SET stars = stars - 5, insurance = 1 WHERE user_id = ?", (user['user_id'],))
+                await callback.answer("✅ Страховка!", show_alert=True)
+            elif callback.data == "buy_ex" and user['stars'] >= 1:
+                await db.execute("UPDATE users SET stars = stars - 1, coins = coins + 50 WHERE user_id = ?", (user['user_id'],))
+                await callback.answer("✅ +50💰!", show_alert=True)
+            else:
+                await callback.answer("❌ Недостаточно звёзд!", show_alert=True)
+                return
+            await db.commit()
+    except Exception as e:
+        logging.error(f"Ошибка в process_shop: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
 
 # ============================================================
 # СМЕНА НИКА
@@ -1033,16 +1167,23 @@ async def cmd_change_nick(message: Message):
     if new_nick.startswith("@"):
         new_nick = new_nick[1:]
 
+    if len(new_nick) < 2 or len(new_nick) > 30:
+        await message.answer("❌ Ник должен быть от 2 до 30 символов!")
+        return
+
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     if user['stars'] < 10:
         await message.answer("❌ Нужно 10⭐!")
         return
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET stars = stars - 10, custom_nick = ? WHERE user_id = ?", (new_nick, message.from_user.id))
-        await db.commit()
-
-    await message.answer(f"✅ Ник изменён на: {new_nick}")
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE users SET stars = stars - 10, custom_nick = ? WHERE user_id = ?", (new_nick, message.from_user.id))
+            await db.commit()
+        await message.answer(f"✅ Ник изменён на: {new_nick}")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_change_nick: {e}")
+        await message.answer("❌ Произошла ошибка при смене ника.")
 
 # ============================================================
 # СКРЫТИЕ ПРОФИЛЯ
@@ -1054,90 +1195,102 @@ async def cmd_hide_profile(message: Message):
         await message.answer("❌ Нужно 1000⭐!")
         return
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET stars = stars - 1000, is_hidden = 1 WHERE user_id = ?", (message.from_user.id,))
-        await db.commit()
-
-    await message.answer("🔒 Профиль скрыт за 1000⭐!")
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE users SET stars = stars - 1000, is_hidden = 1 WHERE user_id = ?", (message.from_user.id,))
+            await db.commit()
+        await message.answer("🔒 Профиль скрыт за 1000⭐!")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_hide_profile: {e}")
+        await message.answer("❌ Произошла ошибка.")
 
 @router.message(F.text.lower() == "открыть_профиль")
 async def cmd_unhide_profile(message: Message):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET is_hidden = 0 WHERE user_id = ?", (message.from_user.id,))
-        await db.commit()
-    await message.answer("🔓 Профиль открыт!")
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE users SET is_hidden = 0 WHERE user_id = ?", (message.from_user.id,))
+            await db.commit()
+        await message.answer("🔓 Профиль открыт!")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_unhide_profile: {e}")
+        await message.answer("❌ Произошла ошибка.")
 
 # ============================================================
 # ПРОФИЛЬ (С ФОТО)
 # ============================================================
 @router.message(F.text.lower().in_(["профиль", "п"]))
 async def cmd_profile(message: Message):
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    rank = calculate_rank(user['wins'], user['total_games'])
-    display_name = user['custom_nick'] or user['username'] or f"Игрок_{user['user_id']}"
+    try:
+        user = await get_or_create_user(message.from_user.id, message.from_user.username)
+        rank = calculate_rank(user['wins'], user['total_games'])
+        display_name = user['custom_nick'] or user['username'] or f"Игрок_{user['user_id']}"
 
-    games_data = [
-        ("🎰 Рулетка", user['roulette_wins'], user['roulette_games']),
-        ("🤠 Дуэль", user['duel_wins'], user['duel_games']),
-        ("🐱 Котики", user['cat_wins'], user['cat_games']),
-        ("🎰 Казино", user['casino_wins'], user['casino_games']),
-    ]
+        games_data = [
+            ("🎰 Рулетка", user['roulette_wins'], user['roulette_games']),
+            ("🤠 Дуэль", user['duel_wins'], user['duel_games']),
+            ("🐱 Котики", user['cat_wins'], user['cat_games']),
+            ("🎰 Казино", user['casino_wins'], user['casino_games']),
+        ]
 
-    stats_text = ""
-    best_game = "Нет игр"
-    best_ratio = 0.0
+        stats_text = ""
+        best_game = "Нет игр"
+        best_ratio = 0.0
 
-    for name, wins, total in games_data:
-        if total > 0:
-            ratio = round((wins / total) * 100, 1)
-            stats_text += f"{name}: {wins}/{total} ({ratio}%)\n"
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_game = name
+        for name, wins, total in games_data:
+            if total > 0:
+                ratio = round((wins / total) * 100, 1)
+                stats_text += f"{name}: {wins}/{total} ({ratio}%)\n"
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_game = name
+            else:
+                stats_text += f"{name}: 0/0 (0%)\n"
+
+        titles = await get_user_titles(user)
+        titles_str = ", ".join(titles) if titles else "Нет"
+
+        gender_emoji = "👨" if user.get('gender') == 'male' else "👩" if user.get('gender') == 'female' else ""
+
+        # ФОТО В ПРОФИЛЕ (ПО ПОЛУ)
+        gender = user.get('gender')
+        if gender == 'male':
+            photo_url = "https://i.ibb.co/dJpfCxPp/5472030760698059296-120.jpg"
+        elif gender == 'female':
+            photo_url = "https://i.ibb.co/PZbYnjh8/5472030760698059295-121.jpg"
         else:
-            stats_text += f"{name}: 0/0 (0%)\n"
+            photo_url = None
 
-    titles = await get_user_titles(user)
-    titles_str = ", ".join(titles) if titles else "Нет"
+        text = (
+            f"{gender_emoji} 👤 Профиль: {display_name}\n"
+            f"🎖️ Ранг: {rank}\n"
+            f"💳 Статус: {'👑 VIP' if user['is_vip'] else 'Обычный'}\n"
+            f"💰 Монеты: {user['coins']:,}\n"
+            f"⭐ Звёзды: {user['stars']}\n"
+            f"🎖️ Титулы: {titles_str}\n"
+            f"📊 Всего игр: {user['total_games']}\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"📈 Статистика по играм:\n{stats_text}\n"
+            f"🏆 Лучшая игра: {best_game} ({best_ratio}%)"
+        )
 
-    gender_emoji = "👨" if user.get('gender') == 'male' else "👩" if user.get('gender') == 'female' else ""
-
-    # ФОТО В ПРОФИЛЕ (ПО ПОЛУ)
-    gender = user.get('gender')
-    if gender == 'male':
-        photo_url = "https://i.ibb.co/dJpfCxPp/5472030760698059296-120.jpg"
-    elif gender == 'female':
-        photo_url = "https://i.ibb.co/PZbYnjh8/5472030760698059295-121.jpg"
-    else:
-        photo_url = None
-
-    text = (
-        f"{gender_emoji} 👤 Профиль: {display_name}\n"
-        f"🎖️ Ранг: {rank}\n"
-        f"💳 Статус: {'👑 VIP' if user['is_vip'] else 'Обычный'}\n"
-        f"💰 Монеты: {user['coins']:,}\n"
-        f"⭐ Звёзды: {user['stars']}\n"
-        f"🎖️ Титулы: {titles_str}\n"
-        f"📊 Всего игр: {user['total_games']}\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"📈 Статистика по играм:\n{stats_text}\n"
-        f"🏆 Лучшая игра: {best_game} ({best_ratio}%)"
-    )
-
-    reply_markup = get_main_keyboard() if message.chat.type == ChatType.PRIVATE else None
-    
-    if photo_url:
-        await message.answer_photo(photo=photo_url, caption=text, parse_mode="Markdown", reply_markup=reply_markup)
-    else:
-        await message.answer(text, parse_mode="Markdown", reply_markup=reply_markup)
+        reply_markup = get_main_keyboard() if message.chat.type == ChatType.PRIVATE else None
+        
+        if photo_url:
+            await message.answer_photo(photo=photo_url, caption=text, parse_mode="Markdown", reply_markup=reply_markup)
+        else:
+            await message.answer(text, parse_mode="Markdown", reply_markup=reply_markup)
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_profile: {e}")
+        await message.answer("❌ Произошла ошибка при загрузке профиля.")
 
 # ============================================================
 # СТАТИСТИКА
 # ============================================================
 @router.message(F.text.lower().in_(["статистика", "стата"]))
 async def cmd_stats(message: Message):
-    u = await get_or_create_user(message.from_user.id, message.from_user.username)
-    text = f"""📊 СТАТИСТИКА
+    try:
+        u = await get_or_create_user(message.from_user.id, message.from_user.username)
+        text = f"""📊 СТАТИСТИКА
 
 🎰 Рулетка: {u['roulette_wins']}/{u['roulette_games']} побед
 🤠 Дуэль: {u['duel_wins']}/{u['duel_games']} побед
@@ -1147,7 +1300,10 @@ async def cmd_stats(message: Message):
 🔥 Всего игр: {u['total_games']}
 🏆 Побед: {u['wins']}
 💀 Поражений: {u['losses']}"""
-    await message.answer(text, parse_mode="Markdown")
+        await message.answer(text, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_stats: {e}")
+        await message.answer("❌ Произошла ошибка.")
 
 # ============================================================
 # ТОПЫ
@@ -1161,25 +1317,54 @@ async def cmd_top(message: Message):
     await show_top_players(message, kb)
 
 async def show_top_players(message: Message, kb: InlineKeyboardMarkup = None):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT user_id, username, custom_nick, wins, coins FROM users ORDER BY wins DESC LIMIT 10") as c:
-            rows = await c.fetchall()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT user_id, username, custom_nick, wins, coins FROM users ORDER BY wins DESC LIMIT 10") as c:
+                rows = await c.fetchall()
 
-    text = "🏆 ТОП ИГРОКОВ:\n\n"
-    for idx, r in enumerate(rows, start=1):
-        name = r['custom_nick'] or r['username'] or f"Игрок_{r['user_id']}"
-        text += f"{idx}. {name} — {r['wins']} побед ({r['coins']}💰)\n"
+        text = "🏆 ТОП ИГРОКОВ:\n\n"
+        for idx, r in enumerate(rows, start=1):
+            name = r['custom_nick'] or r['username'] or f"Игрок_{r['user_id']}"
+            text += f"{idx}. {name} — {r['wins']} побед ({r['coins']}💰)\n"
 
-    text += "\n━━━━━━━━━━━━━━━━━━━\n"
-    text += "🎁 Награды:\n🥇 1 место — 25⭐ + 100💰\n🥈 2 место — 15⭐ + 50💰\n🥉 3 место — 10⭐ + 25💰"
+        text += "\n━━━━━━━━━━━━━━━━━━━\n"
+        text += "🎁 Награды:\n🥇 1 место — 25⭐ + 100💰\n🥈 2 место — 15⭐ + 50💰\n🥉 3 место — 10⭐ + 25💰"
 
-    if not kb:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💍 Топ Семей", callback_data="switch_top_families")]
-        ])
+        if not kb:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💍 Топ Семей", callback_data="switch_top_families")]
+            ])
 
-    await message.answer(text, parse_mode="Markdown", reply_markup=kb)
+        await message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    except Exception as e:
+        logging.error(f"Ошибка в show_top_players: {e}")
+        await message.answer("❌ Произошла ошибка при загрузке топа.")
+
+async def show_top_families(message: Message, kb: InlineKeyboardMarkup = None):
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT id, name, score, created_at FROM families ORDER BY score DESC LIMIT 10") as c:
+                rows = await c.fetchall()
+
+        text = "💍 ТОП СЕМЕЙ:\n\n"
+        for idx, r in enumerate(rows, start=1):
+            name = r['name'] or f"Семья #{r['id']}"
+            text += f"{idx}. {name} — {r['score']} очков ({r['created_at']})\n"
+
+        text += "\n━━━━━━━━━━━━━━━━━━━\n"
+        text += "🎁 Награды:\n🥇 1 место — 30⭐\n🥈 2 место — 20⭐\n🥉 3 место — 10⭐"
+
+        if not kb:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🏆 Топ Игроков", callback_data="switch_top_players")]
+            ])
+
+        await message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    except Exception as e:
+        logging.error(f"Ошибка в show_top_families: {e}")
+        await message.answer("❌ Произошла ошибка при загрузке топа семей.")
 
 @router.callback_query(F.data == "switch_top_families")
 async def switch_top_families(callback: CallbackQuery):
@@ -1187,27 +1372,7 @@ async def switch_top_families(callback: CallbackQuery):
         [InlineKeyboardButton(text="🏆 Топ Игроков", callback_data="switch_top_players")]
     ])
     await show_top_families(callback.message, kb)
-
-async def show_top_families(message: Message, kb: InlineKeyboardMarkup = None):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT id, name, score, created_at FROM families ORDER BY score DESC LIMIT 10") as c:
-            rows = await c.fetchall()
-
-    text = "💍 ТОП СЕМЕЙ:\n\n"
-    for idx, r in enumerate(rows, start=1):
-        name = r['name'] or f"Семья #{r['id']}"
-        text += f"{idx}. {name} — {r['score']} очков ({r['created_at']})\n"
-
-    text += "\n━━━━━━━━━━━━━━━━━━━\n"
-    text += "🎁 Награды:\n🥇 1 место — 30⭐\n🥈 2 место — 20⭐\n🥉 3 место — 10⭐"
-
-    if not kb:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏆 Топ Игроков", callback_data="switch_top_players")]
-        ])
-
-    await message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    await callback.answer()
 
 @router.callback_query(F.data == "switch_top_players")
 async def switch_top_players(callback: CallbackQuery):
@@ -1215,98 +1380,115 @@ async def switch_top_players(callback: CallbackQuery):
         [InlineKeyboardButton(text="💍 Топ Семей", callback_data="switch_top_families")]
     ])
     await show_top_players(callback.message, kb)
+    await callback.answer()
 
 # ============================================================
 # КВЕСТЫ
 # ============================================================
 @router.message(F.text.lower().in_(["квесты", "🎯 квесты"]))
 async def cmd_quests(message: Message):
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("""
-            SELECT quest1, quest1_done, quest2, quest2_done, quest3, quest3_done,
-                   quest4, quest4_done, quest5, quest5_done, quest_bonus_claimed
-            FROM users WHERE user_id = ?
-        """, (message.from_user.id,)) as c:
-            q = await c.fetchone()
+    try:
+        user = await get_or_create_user(message.from_user.id, message.from_user.username)
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT quest1, quest1_done, quest2, quest2_done, quest3, quest3_done,
+                       quest4, quest4_done, quest5, quest5_done, quest_bonus_claimed
+                FROM users WHERE user_id = ?
+            """, (message.from_user.id,)) as c:
+                q = await c.fetchone()
 
-    if not q: return
+        if not q: return
 
-    text = "🎯 **ЕЖЕНЕДЕЛЬНЫЕ КВЕСТЫ**\n\n"
-    for i in range(1, 6):
-        progress = q[f"quest{i}"]
-        done = q[f"quest{i}_done"]
-        target = QUESTS[i-1]["target"]
-        icon = "[✅]" if done else "[ ]"
-        text += f"{icon} {QUESTS[i-1]['name']} — {progress}/{target}\n"
+        text = "🎯 **ЕЖЕНЕДЕЛЬНЫЕ КВЕСТЫ**\n\n"
+        for i in range(1, 6):
+            progress = q[f"quest{i}"]
+            done = q[f"quest{i}_done"]
+            target = QUESTS[i-1]["target"]
+            icon = "✅" if done else "⬜"
+            text += f"{icon} {QUESTS[i-1]['name']} — {progress}/{target}\n"
 
-    bonus = "✅" if q["quest_bonus_claimed"] else "❌"
-    text += f"\n🎁 Бонус за все 5 квестов: {bonus} +10⭐"
+        bonus = "✅" if q["quest_bonus_claimed"] else "❌"
+        text += f"\n🎁 Бонус за все 5 квестов: {bonus} +10⭐"
 
-    await message.answer(text, parse_mode="Markdown")
+        await message.answer(text, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_quests: {e}")
+        await message.answer("❌ Произошла ошибка при загрузке квестов.")
 
 # ============================================================
 # ТУРНИР
 # ============================================================
 @router.message(F.text.lower().in_(["турнир", "🏆 турнир"]))
 async def cmd_tournament(message: Message):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT user_id, tournament_wins FROM users WHERE tournament_wins > 0 ORDER BY tournament_wins DESC LIMIT 10") as c:
-            rows = await c.fetchall()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT user_id, tournament_wins FROM users WHERE tournament_wins > 0 ORDER BY tournament_wins DESC LIMIT 10") as c:
+                rows = await c.fetchall()
 
-    text = "🏆 **ЕЖЕНЕДЕЛЬНЫЙ ТУРНИР**\n\n"
-    if rows:
-        for idx, r in enumerate(rows, start=1):
-            user = await get_or_create_user(r['user_id'], None)
-            name = user.get('custom_nick') or user.get('username') or f"Игрок_{r['user_id']}"
-            text += f"{idx}. {name} — {r['tournament_wins']} побед\n"
-    else:
-        text += "❌ В турнире пока нет участников.\n"
+        text = "🏆 **ЕЖЕНЕДЕЛЬНЫЙ ТУРНИР**\n\n"
+        if rows:
+            for idx, r in enumerate(rows, start=1):
+                user = await get_or_create_user(r['user_id'], None)
+                name = user.get('custom_nick') or user.get('username') or f"Игрок_{r['user_id']}"
+                text += f"{idx}. {name} — {r['tournament_wins']} побед\n"
+        else:
+            text += "❌ В турнире пока нет участников.\n"
 
-    time_left = await get_tournament_time_left()
-    text += f"\n⏳ До завершения турнира: **{time_left}**\n\n"
-    text += "🎟️ Участие: 10⭐\n💰 Призовой фонд: 500⭐ + взносы\n🥇 1 место — 60%\n🥈 2 место — 30%\n🥉 3 место — 10%"
+        time_left = await get_tournament_time_left()
+        text += f"\n⏳ До завершения турнира: **{time_left}**\n\n"
+        text += "🎟️ Участие: 10⭐\n💰 Призовой фонд: 500⭐ + взносы\n🥇 1 место — 60%\n🥈 2 место — 30%\n🥉 3 место — 10%"
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎟️ Участвовать (10⭐)", callback_data="join_tournament")],
-        [InlineKeyboardButton(text="🏆 Топ недели", callback_data="tournament_top")]
-    ])
-    await message.answer(text, parse_mode="Markdown", reply_markup=kb)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🎟️ Участвовать (10⭐)", callback_data="join_tournament")],
+            [InlineKeyboardButton(text="🏆 Топ недели", callback_data="tournament_top")]
+        ])
+        await message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_tournament: {e}")
+        await message.answer("❌ Произошла ошибка при загрузке турнира.")
 
 @router.callback_query(F.data == "join_tournament")
 async def process_join_tournament(callback: CallbackQuery):
-    user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
-    if user['stars'] < 10:
-        await callback.answer("❌ Нужно 10⭐!", show_alert=True)
-        return
+    try:
+        user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
+        if user['stars'] < 10:
+            await callback.answer("❌ Нужно 10⭐!", show_alert=True)
+            return
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET stars = stars - 10, tournament_fee_paid = 1 WHERE user_id = ?", (user['user_id'],))
-        await db.commit()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE users SET stars = stars - 10, tournament_fee_paid = 1 WHERE user_id = ?", (user['user_id'],))
+            await db.commit()
 
-    await callback.answer("✅ Ты в турнире!", show_alert=True)
+        await callback.answer("✅ Ты в турнире!", show_alert=True)
+    except Exception as e:
+        logging.error(f"Ошибка в process_join_tournament: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
 
 @router.callback_query(F.data == "tournament_top")
 async def tournament_top(callback: CallbackQuery):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT user_id, tournament_wins FROM users WHERE tournament_wins > 0 ORDER BY tournament_wins DESC LIMIT 10") as c:
-            rows = await c.fetchall()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT user_id, tournament_wins FROM users WHERE tournament_wins > 0 ORDER BY tournament_wins DESC LIMIT 10") as c:
+                rows = await c.fetchall()
 
-    text = "🏆 **ТОП НЕДЕЛИ (ТУРНИР)**\n\n"
-    if rows:
-        for idx, r in enumerate(rows, start=1):
-            user = await get_or_create_user(r['user_id'], None)
-            name = user.get('custom_nick') or user.get('username') or f"Игрок_{r['user_id']}"
-            text += f"{'🥇' if idx == 1 else '🥈' if idx == 2 else '🥉' if idx == 3 else f'{idx}.'} {name} — {r['tournament_wins']} побед\n"
-        text += "\n🎁 **Награды за турнир:**\n🥇 1 место — 60% фонда\n🥈 2 место — 30% фонда\n🥉 3 место — 10% фонда"
-    else:
-        text += "❌ В турнире пока нет участников."
+        text = "🏆 **ТОП НЕДЕЛИ (ТУРНИР)**\n\n"
+        if rows:
+            for idx, r in enumerate(rows, start=1):
+                user = await get_or_create_user(r['user_id'], None)
+                name = user.get('custom_nick') or user.get('username') or f"Игрок_{r['user_id']}"
+                text += f"{'🥇' if idx == 1 else '🥈' if idx == 2 else '🥉' if idx == 3 else f'{idx}.'} {name} — {r['tournament_wins']} побед\n"
+            text += "\n🎁 **Награды за турнир:**\n🥇 1 место — 60% фонда\n🥈 2 место — 30% фонда\n🥉 3 место — 10% фонда"
+        else:
+            text += "❌ В турнире пока нет участников."
 
-    await callback.message.edit_text(text, parse_mode="Markdown")
-    await callback.answer()
+        await callback.message.edit_text(text, parse_mode="Markdown")
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка в tournament_top: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
 
 # ============================================================
 # СЕМЬЯ (С ИМЕНЕМ)
@@ -1327,11 +1509,16 @@ async def cmd_marry(message: Message):
     args = message.text.split(maxsplit=1)
     family_name = args[1] if len(args) > 1 else f"Семья {u1['username']} и {u2['username']}"
 
+    if len(family_name) > 50:
+        await message.answer("❌ Название семьи слишком длинное (макс 50 символов)!")
+        return
+
     family_name_requests[u2['user_id']] = {
         "from": u1['user_id'],
         "from_name": u1['custom_nick'] or u1['username'] or f"Игрок_{u1['user_id']}",
         "to_name": u2['custom_nick'] or u2['username'] or f"Игрок_{u2['user_id']}",
-        "name": family_name
+        "name": family_name,
+        "timeout": asyncio.create_task(family_request_timeout(u2['user_id']))
     }
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -1345,65 +1532,96 @@ async def cmd_marry(message: Message):
         reply_markup=kb
     )
 
+async def family_request_timeout(user_id: int):
+    await asyncio.sleep(120)
+    if user_id in family_name_requests:
+        del family_name_requests[user_id]
+
 @router.callback_query(F.data.startswith("family_accept_"))
 async def family_accept(callback: CallbackQuery):
-    _, u1, u2 = callback.data.split("_")
-    u1, u2 = int(u1), int(u2)
+    try:
+        _, u1, u2 = callback.data.split("_")
+        u1, u2 = int(u1), int(u2)
 
-    if callback.from_user.id != u2:
-        await callback.answer("Не тебе!", show_alert=True)
-        return
+        if callback.from_user.id != u2:
+            await callback.answer("Не тебе!", show_alert=True)
+            return
 
-    req = family_name_requests.get(u2)
-    if not req:
-        await callback.answer("Запрос устарел!", show_alert=True)
-        return
+        req = family_name_requests.get(u2)
+        if not req:
+            await callback.answer("Запрос устарел!", show_alert=True)
+            return
 
-    today = datetime.date.today().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
-        c = await db.execute("INSERT INTO families (user1_id, user2_id, name, created_at) VALUES (?, ?, ?, ?)",
-                             (u1, u2, req['name'], today))
-        fam_id = c.lastrowid
-        await db.execute("UPDATE users SET family_id = ?, spouse_id = ?, stars = stars + 5 WHERE user_id IN (?, ?)", (fam_id, u1, u2, u1, u2))
-        await db.commit()
+        if "timeout" in req:
+            req["timeout"].cancel()
 
-    del family_name_requests[u2]
-    await callback.message.edit_text(f"🎉 СЕМЬЯ СОЗДАНА!\nИмя: {req['name']}\n+5⭐ каждому!")
+        today = datetime.date.today().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            c = await db.execute("INSERT INTO families (user1_id, user2_id, name, created_at) VALUES (?, ?, ?, ?)",
+                                 (u1, u2, req['name'], today))
+            fam_id = c.lastrowid
+            await db.execute("UPDATE users SET family_id = ?, spouse_id = ?, stars = stars + 5 WHERE user_id IN (?, ?)", (fam_id, u1, u2, u1, u2))
+            await db.commit()
+
+        del family_name_requests[u2]
+        await callback.message.edit_text(f"🎉 СЕМЬЯ СОЗДАНА!\nИмя: {req['name']}\n+5⭐ каждому!")
+    except Exception as e:
+        logging.error(f"Ошибка в family_accept: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
 
 @router.callback_query(F.data.startswith("family_own_"))
 async def family_own(callback: CallbackQuery, state: FSMContext):
-    _, u1, u2 = callback.data.split("_")
-    u1, u2 = int(u1), int(u2)
+    try:
+        _, u1, u2 = callback.data.split("_")
+        u1, u2 = int(u1), int(u2)
 
-    if callback.from_user.id != u2:
-        await callback.answer("Не тебе!", show_alert=True)
-        return
+        if callback.from_user.id != u2:
+            await callback.answer("Не тебе!", show_alert=True)
+            return
 
-    req = family_name_requests.get(u2)
-    if not req:
-        await callback.answer("Запрос устарел!", show_alert=True)
-        return
+        req = family_name_requests.get(u2)
+        if not req:
+            await callback.answer("Запрос устарел!", show_alert=True)
+            return
 
-    await state.update_data(u1=u1, u2=u2)
-    await state.set_state(FamilyNameState.waiting_for_name)
-    await callback.message.edit_text("✏️ Напиши своё имя для семьи:")
+        if "timeout" in req:
+            req["timeout"].cancel()
+
+        await state.update_data(u1=u1, u2=u2)
+        await state.set_state(FamilyNameState.waiting_for_name)
+        await callback.message.edit_text("✏️ Напиши своё имя для семьи (макс 50 символов):")
+    except Exception as e:
+        logging.error(f"Ошибка в family_own: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
 
 @router.message(FamilyNameState.waiting_for_name)
 async def family_name_input(message: Message, state: FSMContext):
-    data = await state.get_data()
-    u1, u2 = data.get("u1"), data.get("u2")
-    new_name = message.text
+    try:
+        data = await state.get_data()
+        u1, u2 = data.get("u1"), data.get("u2")
+        new_name = message.text.strip()
 
-    today = datetime.date.today().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
-        c = await db.execute("INSERT INTO families (user1_id, user2_id, name, created_at) VALUES (?, ?, ?, ?)",
-                             (u1, u2, new_name, today))
-        fam_id = c.lastrowid
-        await db.execute("UPDATE users SET family_id = ?, spouse_id = ?, stars = stars + 5 WHERE user_id IN (?, ?)", (fam_id, u1, u2, u1, u2))
-        await db.commit()
+        if not new_name or len(new_name) > 50:
+            await message.answer("❌ Название должно быть от 1 до 50 символов!")
+            return
 
-    await state.clear()
-    await message.answer(f"🎉 СЕМЬЯ СОЗДАНА!\nИмя: {new_name}\n+5⭐ каждому!")
+        # Удаляем запрос, если он еще существует
+        if u2 in family_name_requests:
+            del family_name_requests[u2]
+
+        today = datetime.date.today().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            c = await db.execute("INSERT INTO families (user1_id, user2_id, name, created_at) VALUES (?, ?, ?, ?)",
+                                 (u1, u2, new_name, today))
+            fam_id = c.lastrowid
+            await db.execute("UPDATE users SET family_id = ?, spouse_id = ?, stars = stars + 5 WHERE user_id IN (?, ?)", (fam_id, u1, u2, u1, u2))
+            await db.commit()
+
+        await state.clear()
+        await message.answer(f"🎉 СЕМЬЯ СОЗДАНА!\nИмя: {new_name}\n+5⭐ каждому!")
+    except Exception as e:
+        logging.error(f"Ошибка в family_name_input: {e}")
+        await message.answer("❌ Произошла ошибка при создании семьи.")
 
 # ============================================================
 # СМЕНА НАЗВАНИЯ СЕМЬИ ЗА 5⭐
@@ -1418,101 +1636,130 @@ async def cmd_change_family_name(message: Message):
     partner_username = args[1].replace("@", "")
     new_name = args[2].strip()
 
-    if not new_name:
-        await message.answer("❌ Название не может быть пустым!")
+    if not new_name or len(new_name) > 50:
+        await message.answer("❌ Название должно быть от 1 до 50 символов!")
         return
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT user_id FROM users WHERE username = ? OR custom_nick = ?", (partner_username, partner_username)) as c:
-            partner = await c.fetchone()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            # Сначала ищем по username
+            async with db.execute("SELECT user_id FROM users WHERE username = ?", (partner_username,)) as c:
+                partner = await c.fetchone()
+            if not partner:
+                # Если не найден, ищем по custom_nick
+                async with db.execute("SELECT user_id FROM users WHERE custom_nick = ?", (partner_username,)) as c:
+                    partner = await c.fetchone()
 
-    if not partner:
-        await message.answer("❌ Партнёр не найден!")
-        return
+        if not partner:
+            await message.answer("❌ Партнёр не найден!")
+            return
 
-    partner_id = partner['user_id']
+        partner_id = partner['user_id']
 
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    if not user.get('family_id'):
-        await message.answer("❌ У тебя нет семьи!")
-        return
+        user = await get_or_create_user(message.from_user.id, message.from_user.username)
+        if not user.get('family_id'):
+            await message.answer("❌ У тебя нет семьи!")
+            return
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT user1_id, user2_id, name FROM families WHERE id = ?", (user['family_id'],)) as c:
-            fam = await c.fetchone()
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT user1_id, user2_id, name FROM families WHERE id = ?", (user['family_id'],)) as c:
+                fam = await c.fetchone()
 
-    if not fam:
-        await message.answer("❌ Семья не найдена!")
-        return
+        if not fam:
+            await message.answer("❌ Семья не найдена!")
+            return
 
-    if partner_id not in (fam['user1_id'], fam['user2_id']):
-        await message.answer("❌ Этот игрок не состоит с тобой в семье!")
-        return
+        if partner_id not in (fam['user1_id'], fam['user2_id']):
+            await message.answer("❌ Этот игрок не состоит с тобой в семье!")
+            return
 
-    if user['stars'] < 5:
-        await message.answer("❌ Нужно 5⭐ для смены названия семьи!")
-        return
+        if user['stars'] < 5:
+            await message.answer("❌ Нужно 5⭐ для смены названия семьи!")
+            return
 
-    family_name_change_requests[partner_id] = {
-        "from": user['user_id'],
-        "family_id": user['family_id'],
-        "new_name": new_name,
-        "old_name": fam['name'] or f"Семья #{fam['id']}"
-    }
+        family_name_change_requests[partner_id] = {
+            "from": user['user_id'],
+            "family_id": user['family_id'],
+            "new_name": new_name,
+            "old_name": fam['name'] or f"Семья #{fam['id']}",
+            "timeout": asyncio.create_task(family_change_timeout(partner_id))
+        }
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Согласиться", callback_data=f"family_name_accept_{user['user_id']}_{partner_id}_{user['family_id']}")],
-        [InlineKeyboardButton(text="❌ Отказаться", callback_data=f"family_name_reject_{partner_id}")]
-    ])
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Согласиться", callback_data=f"family_name_accept_{user['user_id']}_{partner_id}_{user['family_id']}")],
+            [InlineKeyboardButton(text="❌ Отказаться", callback_data=f"family_name_reject_{partner_id}")]
+        ])
 
-    await message.answer(
-        f"✏️ @{partner_username}, {message.from_user.username} предлагает сменить название семьи на **{new_name}**!\n\n"
-        f"💰 Стоимость: 5⭐ (списывается у инициатора после подтверждения)\n"
-        f"Текущее название: {fam['name'] or f'Семья #{fam['id']}'}",
-        reply_markup=kb,
-        parse_mode="Markdown"
-    )
+        await message.answer(
+            f"✏️ @{partner_username}, {message.from_user.username} предлагает сменить название семьи на **{new_name}**!\n\n"
+            f"💰 Стоимость: 5⭐ (списывается у инициатора после подтверждения)\n"
+            f"Текущее название: {fam['name'] or f'Семья #{fam['id']}'}",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_change_family_name: {e}")
+        await message.answer("❌ Произошла ошибка.")
 
-@router.callback_query(F.data.startswith("family_name_accept_"))
-async def family_name_accept(callback: CallbackQuery):
-    _, u1, u2, fam_id = callback.data.split("_")
-    u1, u2, fam_id = int(u1), int(u2), int(fam_id)
-
-    if callback.from_user.id != u2:
-        await callback.answer("❌ Не тебе!", show_alert=True)
-        return
-
-    req = family_name_change_requests.get(u2)
-    if not req:
-        await callback.answer("❌ Запрос устарел!", show_alert=True)
-        return
-
-    new_name = req["new_name"]
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET stars = stars - 5 WHERE user_id = ?", (u1,))
-        await db.execute("UPDATE families SET name = ? WHERE id = ?", (new_name, fam_id))
-        await db.commit()
-
-    del family_name_change_requests[u2]
-
-    await callback.message.edit_text(f"✅ Название семьи успешно изменено на **{new_name}**! (5⭐ списано у инициатора)", parse_mode="Markdown")
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("family_name_reject_"))
-async def family_name_reject(callback: CallbackQuery):
-    user_id = int(callback.data.split("_")[2])
-    if callback.from_user.id != user_id:
-        await callback.answer("❌ Не тебе!", show_alert=True)
-        return
-
+async def family_change_timeout(user_id: int):
+    await asyncio.sleep(120)
     if user_id in family_name_change_requests:
         del family_name_change_requests[user_id]
 
-    await callback.message.edit_text("❌ Смена названия семьи отменена.")
-    await callback.answer()
+@router.callback_query(F.data.startswith("family_name_accept_"))
+async def family_name_accept(callback: CallbackQuery):
+    try:
+        _, u1, u2, fam_id = callback.data.split("_")
+        u1, u2, fam_id = int(u1), int(u2), int(fam_id)
+
+        if callback.from_user.id != u2:
+            await callback.answer("❌ Не тебе!", show_alert=True)
+            return
+
+        req = family_name_change_requests.get(u2)
+        if not req:
+            await callback.answer("❌ Запрос устарел!", show_alert=True)
+            return
+
+        if "timeout" in req:
+            req["timeout"].cancel()
+
+        new_name = req["new_name"]
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE users SET stars = stars - 5 WHERE user_id = ?", (u1,))
+            await db.execute("UPDATE families SET name = ? WHERE id = ?", (new_name, fam_id))
+            await db.commit()
+
+        del family_name_change_requests[u2]
+
+        await callback.message.edit_text(f"✅ Название семьи успешно изменено на **{new_name}**! (5⭐ списано у инициатора)", parse_mode="Markdown")
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка в family_name_accept: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
+
+@router.callback_query(F.data.startswith("family_name_reject_"))
+async def family_name_reject(callback: CallbackQuery):
+    try:
+        user_id = int(callback.data.split("_")[2])
+        if callback.from_user.id != user_id:
+            await callback.answer("❌ Не тебе!", show_alert=True)
+            return
+
+        if user_id in family_name_change_requests:
+            req = family_name_change_requests[user_id]
+            if "timeout" in req:
+                req["timeout"].cancel()
+            del family_name_change_requests[user_id]
+
+        await callback.message.edit_text("❌ Смена названия семьи отменена.")
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка в family_name_reject: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
 
 # ============================================================
 # РЕБЁНОК (ТОЛЬКО ПОСЛЕ 5 РАЗ В ТОП-1)
@@ -1530,138 +1777,220 @@ async def cmd_adopt(message: Message):
         await message.answer("❌ Сначала создай семью!")
         return
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT top1_count FROM families WHERE id = ?", (parent['family_id'],)) as c:
-            fam = await c.fetchone()
-
-    if not fam or fam['top1_count'] < 5:
-        await message.answer("❌ Семья должна быть в топ-1 хотя бы 5 раз, чтобы завести ребёнка!")
+    if parent['family_id'] is None:
+        await message.answer("❌ Сначала создай семью!")
         return
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT 1 FROM children WHERE family_id = ? AND child_id = ?", (parent['family_id'], child['user_id'])) as c:
-            if await c.fetchone():
-                await message.answer("❌ Этот игрок уже усыновлён!")
-                return
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT top1_count FROM families WHERE id = ?", (parent['family_id'],)) as c:
+                fam = await c.fetchone()
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("INSERT INTO children (family_id, child_id) VALUES (?, ?)", (parent['family_id'], child['user_id']))
-        await db.commit()
+        if not fam or fam['top1_count'] < 5:
+            await message.answer("❌ Семья должна быть в топ-1 хотя бы 5 раз, чтобы завести ребёнка!")
+            return
 
-    await message.answer(f"👶 {message.reply_to_message.from_user.first_name} усыновлён!")
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT 1 FROM children WHERE family_id = ? AND child_id = ?", (parent['family_id'], child['user_id'])) as c:
+                if await c.fetchone():
+                    await message.answer("❌ Этот игрок уже усыновлён!")
+                    return
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("INSERT INTO children (family_id, child_id) VALUES (?, ?)", (parent['family_id'], child['user_id']))
+            await db.commit()
+
+        await message.answer(f"👶 {message.reply_to_message.from_user.first_name} усыновлён!")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_adopt: {e}")
+        await message.answer("❌ Произошла ошибка при усыновлении.")
 
 # ============================================================
 # СЕМЬЯ (ИНФО)
 # ============================================================
 @router.message(F.text.lower().in_(["семья", "💍 семья"]))
 async def cmd_family(message: Message):
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    if not user['family_id']:
-        await message.answer("❌ Нет семьи!")
-        return
+    try:
+        user = await get_or_create_user(message.from_user.id, message.from_user.username)
+        if not user['family_id']:
+            await message.answer("❌ Нет семьи!")
+            return
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM families WHERE id = ?", (user['family_id'],)) as c:
-            fam = await c.fetchone()
-        async with db.execute("SELECT child_id FROM children WHERE family_id = ?", (user['family_id'],)) as c2:
-            children = await c2.fetchall()
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM families WHERE id = ?", (user['family_id'],)) as c:
+                fam = await c.fetchone()
+            async with db.execute("SELECT child_id FROM children WHERE family_id = ?", (user['family_id'],)) as c2:
+                children = await c2.fetchall()
 
-    text = f"""💍 СЕМЬЯ: {fam['name'] or f"Семья #{fam['id']}"}
+        if not fam:
+            await message.answer("❌ Семья не найдена!")
+            return
+
+        text = f"""💍 СЕМЬЯ: {fam['name'] or f"Семья #{fam['id']}"}
 📅 Создана: {fam['created_at']}
 ⭐ Очки: {fam['score']}
 🎖️ Топ-1 раз: {fam['top1_count']}
 👶 Детей: {len(children)}"""
-    await message.answer(text, parse_mode="Markdown")
+        await message.answer(text, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_family: {e}")
+        await message.answer("❌ Произошла ошибка при загрузке информации о семье.")
 
 # ============================================================
 # РАЗВОД
 # ============================================================
 @router.message(F.text.lower() == "развод")
 async def cmd_divorce(message: Message):
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    if not user['family_id']:
-        await message.answer("❌ Ты не в браке!")
-        return
+    try:
+        user = await get_or_create_user(message.from_user.id, message.from_user.username)
+        if not user['family_id']:
+            await message.answer("❌ Ты не в браке!")
+            return
 
-    ban_date = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM families WHERE id = ?", (user['family_id'],))
-        await db.execute("UPDATE users SET family_id = NULL, spouse_id = NULL, divorce_until = ? WHERE user_id IN (?, ?)",
-                         (ban_date, user['user_id'], user['spouse_id']))
-        await db.commit()
+        ban_date = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM families WHERE id = ?", (user['family_id'],))
+            await db.execute("UPDATE users SET family_id = NULL, spouse_id = NULL, divorce_until = ? WHERE user_id IN (?, ?)",
+                             (ban_date, user['user_id'], user['spouse_id']))
+            await db.commit()
 
-    await message.answer("💔 Развод! Бан на брак 7 дней.")
+        await message.answer("💔 Развод! Бан на брак 7 дней.")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_divorce: {e}")
+        await message.answer("❌ Произошла ошибка при разводе.")
 
 # ============================================================
 # ГОДОВЩИНА
 # ============================================================
 @router.message(F.text.lower() == "годовщина")
 async def cmd_anniversary(message: Message):
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    if not user['family_id']:
-        await message.answer("❌ Нет семьи!")
-        return
+    try:
+        user = await get_or_create_user(message.from_user.id, message.from_user.username)
+        if not user['family_id']:
+            await message.answer("❌ Нет семьи!")
+            return
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT created_at, last_anniversary_month FROM families WHERE id = ?", (user['family_id'],)) as c:
-            fam = await c.fetchone()
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT created_at, last_anniversary_month FROM families WHERE id = ?", (user['family_id'],)) as c:
+                fam = await c.fetchone()
 
-    created = datetime.date.fromisoformat(fam['created_at'])
-    months = (datetime.date.today().year - created.year) * 12 + datetime.date.today().month - created.month
+        if not fam:
+            await message.answer("❌ Семья не найдена!")
+            return
 
-    if months > fam['last_anniversary_month']:
-        reward = min(5 * months, 50)
-        await db.execute("UPDATE families SET last_anniversary_month = ? WHERE id = ?", (months, user['family_id']))
-        await db.execute("UPDATE users SET stars = stars + ? WHERE user_id IN (?, ?)", (reward, user['user_id'], user['spouse_id']))
-        await db.commit()
-        await message.answer(f"🎂 ГОДОВЩИНА! {months} месяцев! +{reward}⭐ каждому!", parse_mode="Markdown")
-    else:
-        await message.answer(f"📅 Вместе {months} месяцев. Следующая годовщина через {months - fam['last_anniversary_month']} мес.")
+        created = datetime.date.fromisoformat(fam['created_at'])
+        months = (datetime.date.today().year - created.year) * 12 + datetime.date.today().month - created.month
+
+        if months > fam['last_anniversary_month']:
+            reward = min(5 * months, 50)
+            await db.execute("UPDATE families SET last_anniversary_month = ? WHERE id = ?", (months, user['family_id']))
+            await db.execute("UPDATE users SET stars = stars + ? WHERE user_id IN (?, ?)", (reward, user['user_id'], user['spouse_id']))
+            await db.commit()
+            await message.answer(f"🎂 ГОДОВЩИНА! {months} месяцев! +{reward}⭐ каждому!", parse_mode="Markdown")
+        else:
+            await message.answer(f"📅 Вместе {months} месяцев. Следующая годовщина через {months - fam['last_anniversary_month']} мес.")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_anniversary: {e}")
+        await message.answer("❌ Произошла ошибка.")
 
 # ============================================================
 # ПРОМОКОДЫ (АДМИН)
 # ============================================================
 @router.message(Command("create_promo"))
 async def cmd_create_promo(message: Message, command: CommandObject):
-    if message.from_user.id != ADMIN_ID: return
-    args = command.args.split() if command.args else []
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Только для админа!")
+        return
+    
+    if not command.args:
+        await message.answer("Формат: /create_promo КОД ЗВЕЗДЫ МОНЕТЫ", parse_mode="Markdown")
+        return
+    
+    args = command.args.split()
     if len(args) < 3:
         await message.answer("Формат: /create_promo КОД ЗВЕЗДЫ МОНЕТЫ", parse_mode="Markdown")
         return
-    code, stars, coins = args[0], int(args[1]), int(args[2])
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("INSERT OR REPLACE INTO promos (code, stars, coins, max_uses) VALUES (?, ?, ?, 100)", (code, stars, coins))
-        await db.commit()
-    await message.answer(f"✅ Промокод {code} создан!", parse_mode="Markdown")
+    
+    try:
+        code, stars, coins = args[0], int(args[1]), int(args[2])
+        if len(code) < 3 or len(code) > 20:
+            await message.answer("❌ Код должен быть от 3 до 20 символов!")
+            return
+        
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("INSERT OR REPLACE INTO promos (code, stars, coins, max_uses) VALUES (?, ?, ?, 100)", (code, stars, coins))
+            await db.commit()
+        
+        await message.answer(f"✅ Промокод {code} создан! (+{coins}💰 +{stars}⭐)", parse_mode="Markdown")
+    except ValueError:
+        await message.answer("❌ Звёзды и монеты должны быть числами!")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_create_promo: {e}")
+        await message.answer("❌ Произошла ошибка при создании промокода.")
 
 @router.message(Command("promo"))
 async def cmd_use_promo(message: Message, command: CommandObject):
-    if not command.args: return
+    if not command.args:
+        await message.answer("❌ Укажите промокод: /promo КОД")
+        return
+    
     code = command.args.strip()
     uid = message.from_user.id
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM promos WHERE code = ?", (code,)) as c:
-            p = await c.fetchone()
-        if not p:
-            await message.answer("❌ Нет такого промокода!")
-            return
-        await db.execute("UPDATE users SET stars = stars + ?, coins = coins + ? WHERE user_id = ?", (p['stars'], p['coins'], uid))
-        await db.commit()
-    await message.answer(f"🎉 +{p['coins']}💰 +{p['stars']}⭐!")
+    
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM promos WHERE code = ?", (code,)) as c:
+                p = await c.fetchone()
+            
+            if not p:
+                await message.answer("❌ Нет такого промокода!")
+                return
+            
+            if p['uses'] >= p['max_uses']:
+                await message.answer("❌ Промокод уже использован максимальное количество раз!")
+                return
+            
+            # Проверяем, использовал ли пользователь этот промокод
+            async with db.execute("SELECT 1 FROM user_promos WHERE user_id = ? AND code = ?", (uid, code)) as c:
+                if await c.fetchone():
+                    await message.answer("❌ Вы уже использовали этот промокод!")
+                    return
+            
+            await db.execute("UPDATE users SET stars = stars + ?, coins = coins + ? WHERE user_id = ?", (p['stars'], p['coins'], uid))
+            await db.execute("UPDATE promos SET uses = uses + 1 WHERE code = ?", (code,))
+            await db.execute("INSERT INTO user_promos (user_id, code) VALUES (?, ?)", (uid, code))
+            await db.commit()
+        
+        await message.answer(f"🎉 Промокод активирован! +{p['coins']}💰 +{p['stars']}⭐!")
+    except Exception as e:
+        logging.error(f"Ошибка в cmd_use_promo: {e}")
+        await message.answer("❌ Произошла ошибка при активации промокода.")
 
 # ============================================================
 # ЗАПУСК
 # ============================================================
 async def main():
-    await init_db()
-    asyncio.create_task(daily_prize_distribution())
-    asyncio.create_task(check_tournament_end())
-    print("🤖 БОТ ЗАПУЩЕН! ВСЁ РАБОТАЕТ!")
-    await dp.start_polling(bot)
+    try:
+        await init_db()
+        
+        # Запускаем фоновые задачи
+        asyncio.create_task(daily_prize_distribution())
+        asyncio.create_task(check_tournament_end())
+        
+        logging.info("🤖 БОТ ЗАПУЩЕН! ВСЁ РАБОТАЕТ!")
+        await dp.start_polling(bot)
+    except Exception as e:
+        logging.error(f"Критическая ошибка при запуске бота: {e}")
+        raise
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info("Бот остановлен пользователем")
+    except Exception as e:
+        logging.error(f"Необработанная ошибка: {e}")
