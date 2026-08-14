@@ -1828,7 +1828,7 @@ async def cmd_family(message: Message):
             await message.answer("❌ Семья не найдена!")
             return
 
-        text = f"""💍 СЕМЬЯ: {fam['name'] or f"Семья #{fam['id']}"}
+        text = f"""💍 СЕМЬЯ: {fam['name'] or f'Семья #{fam["id"]}'}
 📅 Создана: {fam['created_at']}
 ⭐ Очки: {fam['score']}
 🎖️ Топ-1 раз: {fam['top1_count']}
