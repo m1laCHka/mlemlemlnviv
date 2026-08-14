@@ -699,3 +699,13 @@ async def cmd_casino(message: Message):
             chance = "29%"
         else:
             until = (datetime.date.today() + datetime.timedelta(days=30)).isoformat
+
+async def main():
+    await init_db()
+    # Запускаем веб-сервер ПЕРВЫМ
+    await start_web_server()
+    print("🤖 БОТ ЗАПУЩЕН! ВСЁ РАБОТАЕТ!")
+    await dp.start_polling(bot)
+
+
+
