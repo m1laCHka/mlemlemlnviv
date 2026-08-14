@@ -326,54 +326,188 @@ async def get_vip_days(user: dict) -> str:
             return "∞"
     return "∞"
 
-# ---------------------------------------------------------
-# ПОМОЩЬ
-# ---------------------------------------------------------
-HELP_TEXT = """🎮 <b>ПОЛНЫЙ СПИСОК ВОЗМОЖНОСТЕЙ БОТА</b>
+# ============================================================
+# 💍 СЕМЬЯ (ДОЛЖЕН БЫТЬ ПЕРВЫМ!)
+# ============================================================
+@router.message(F.text.lower().in_(["да", "нет"]), F.chat.type == ChatType.PRIVATE)
+async def process_marry_answer(message: Message):
+    print(f"📝 ПОЛУЧЕНО СООБЩЕНИЕ: {message.text} от {message.from_user.id}")
+    print(f"📝 Текущие запросы: {marry_requests}")
+    
+    # Проверяем, есть ли запрос для этого пользователя
+    if message.from_user.id not in marry_requests:
+        print(f"❌ Нет запроса для {message.from_user.id}")
+        return
 
-⭐ Звёзды — ИГРОВАЯ ВАЛЮТА!
+    request = marry_requests[message.from_user.id]
+    answer = message.text.lower()
+    print(f"📝 Ответ: {answer}")
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎲 <b>ИГРЫ</b>
-🎰 Рулетка — р / рулетка (красное, черное, чет, нечет, число)
-🤠 Дуэль — дуэль (сумма) — пошагово
-🐱 Котики — котики (сумма) — вызови соперника! Кто первый угадает — забирает банк
-🎰 Казино — казино — за 25⭐
+    if answer == "нет":
+        await message.answer("💔 Ты отказался от предложения!", parse_mode="HTML")
+        try:
+            await bot.send_message(
+                request["from"],
+                f"💔 {message.from_user.first_name} отказался от предложения обручиться.",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+        del marry_requests[message.from_user.id]
+        return
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💰 <b>ЭКОНОМИКА</b>
-🎁 Приз — приз (1 раз/день, ТОЛЬКО в ЛС)
-🏪 Магазин — магазин
-⭐ Перевод — перевод @username (сумма) (макс 25⭐/день)
+    if answer == "да":
+        print("✅ СОГЛАСИЕ НА БРАК!")
+        u1_id = request["from"]
+        u2_id = message.from_user.id
+        today = datetime.date.today().isoformat()
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👤 <b>ПРОФИЛЬ И ТОПЫ</b>
-👤 Профиль — профиль / профиль @username
-📊 Статистика — статистика / стата
-🏆 Топы — топ, топ_семей
+        async with db_pool.acquire() as conn:
+            # Проверяем ещё раз, не заняты ли
+            u1 = await conn.fetchrow("SELECT family_id FROM users WHERE user_id = $1", u1_id)
+            u2 = await conn.fetchrow("SELECT family_id FROM users WHERE user_id = $1", u2_id)
+            if u1['family_id'] or u2['family_id']:
+                await message.answer("❌ Кто-то уже в браке! Возможно, пока ты думал, кто-то другой сделал предложение.", parse_mode="HTML")
+                del marry_requests[message.from_user.id]
+                return
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💍 <b>СЕМЬЯ</b>
-💍 обручиться @username
-👶 ребёнок @username
-💔 развод
-👨‍👩‍👧‍👦 семья
-🎂 годовщина
+            fam_id = await conn.fetchval(
+                "INSERT INTO families (user1_id, user2_id, created_at) VALUES ($1, $2, $3) RETURNING id",
+                u1_id, u2_id, today
+            )
+            await conn.execute("UPDATE users SET family_id = $1, spouse_id = $2, stars = stars + 5 WHERE user_id IN ($3, $4)",
+                             fam_id, u2_id, u1_id, u2_id)
+            print(f"✅ СЕМЬЯ СОЗДАНА! ID: {fam_id}")
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 <b>КВЕСТЫ И ТУРНИРЫ</b>
-🎯 квесты
-🏆 турнир
-"""
+        await message.answer("🎉 <b>ПОЗДРАВЛЯЮ! СЕМЬЯ СОЗДАНА! +5⭐ каждому!</b>", parse_mode="HTML")
+        try:
+            await bot.send_message(
+                u1_id,
+                f"🎉 <b>{message.from_user.first_name}</b> согласился на брак! Семья создана! +5⭐ каждому!",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+        del marry_requests[message.from_user.id]
 
-@router.message(Command("start"))
-@router.message(F.text.lower().in_(["помощь", "help", "❓ помощь"]))
-async def cmd_help(message: Message):
-    await get_or_create_user(message.from_user.id, message.from_user.username)
-    if message.chat.type == ChatType.PRIVATE:
-        await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=get_main_keyboard())
+@router.message(F.text.lower().startswith("обручиться"))
+async def cmd_marry(message: Message):
+    if not message.reply_to_message:
+        await message.answer("❌ Ответь на сообщение того, с кем хочешь обручиться!", parse_mode="HTML")
+        return
+
+    u1 = await get_or_create_user(message.from_user.id, message.from_user.username)
+    u2 = await get_or_create_user(message.reply_to_message.from_user.id, message.reply_to_message.from_user.username)
+
+    # Проверка: не заняты ли
+    if u1['family_id']:
+        await message.answer("❌ Ты уже в браке!", parse_mode="HTML")
+        return
+    if u2['family_id']:
+        await message.answer("❌ Этот человек уже в браке!", parse_mode="HTML")
+        return
+
+    # Проверка: не сам с собой
+    if u1['user_id'] == u2['user_id']:
+        await message.answer("❌ Нельзя обручиться с самим собой!", parse_mode="HTML")
+        return
+
+    # Сохраняем запрос
+    marry_requests[u2['user_id']] = {
+        "from": u1['user_id'],
+        "from_name": u1['custom_nick'] or u1['username'] or message.from_user.first_name,
+        "chat_id": message.chat.id
+    }
+
+    print(f"📝 ЗАПРОС НА БРАК: {u1['user_id']} -> {u2['user_id']}")
+    print(f"📝 marry_requests: {marry_requests}")
+
+    # Отправляем предложение в ЛС второму игроку
+    try:
+        await bot.send_message(
+            u2['user_id'],
+            f"💍 <b>{marry_requests[u2['user_id']]['from_name']}</b> хочет обручиться с тобой!\n\n"
+            f"Напиши <b>да</b> — чтобы согласиться\n"
+            f"Напиши <b>нет</b> — чтобы отказаться",
+            parse_mode="HTML"
+        )
+        await message.answer(f"✅ Предложение отправлено <b>{u2['custom_nick'] or u2['username'] or 'пользователю'}</b> в ЛС!", parse_mode="HTML")
+    except Exception as e:
+        print(f"❌ Ошибка отправки в ЛС: {e}")
+        await message.answer("❌ Не могу отправить сообщение пользователю. Возможно, он не писал боту.", parse_mode="HTML")
+        if u2['user_id'] in marry_requests:
+            del marry_requests[u2['user_id']]
+
+@router.message(F.text.lower() == "развод")
+async def cmd_divorce(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if not user['family_id']:
+        await message.answer("❌ Ты не в браке!", parse_mode="HTML")
+        return
+
+    ban_date = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM families WHERE id = $1", user['family_id'])
+        await conn.execute("UPDATE users SET family_id = NULL, spouse_id = NULL, divorce_until = $1 WHERE user_id IN ($2, $3)",
+                         ban_date, user['user_id'], user['spouse_id'])
+
+    await message.answer("💔 Развод! Бан на брак 7 дней.", parse_mode="HTML")
+
+@router.message(F.text.lower().startswith("ребёнок"))
+async def cmd_adopt(message: Message):
+    if not message.reply_to_message:
+        await message.answer("❌ Ответь на сообщение!", parse_mode="HTML")
+        return
+
+    parent = await get_or_create_user(message.from_user.id, message.from_user.username)
+    child = await get_or_create_user(message.reply_to_message.from_user.id, message.reply_to_message.from_user.username)
+
+    if not parent['family_id']:
+        await message.answer("❌ Сначала семья!", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO children (family_id, child_id) VALUES ($1, $2)", parent['family_id'], child['user_id'])
+
+    await message.answer(f"👶 {message.reply_to_message.from_user.first_name} усыновлён!", parse_mode="HTML")
+
+@router.message(F.text.lower() == "семья")
+async def cmd_family(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if not user['family_id']:
+        await message.answer("❌ Нет семьи!", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        fam = await conn.fetchrow("SELECT * FROM families WHERE id = $1", user['family_id'])
+
+    text = f"""💍 <b>СЕМЬЯ</b>
+📅 Создана: {fam['created_at']}
+⭐ Очки: {fam['score']}
+🎖️ Топ-1 раз: {fam['top1_count']}"""
+    await message.answer(text, parse_mode="HTML")
+
+@router.message(F.text.lower() == "годовщина")
+async def cmd_anniversary(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if not user['family_id']:
+        await message.answer("❌ Нет семьи!", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        fam = await conn.fetchrow("SELECT created_at, last_anniversary_month FROM families WHERE id = $1", user['family_id'])
+
+    created = datetime.date.fromisoformat(fam['created_at'])
+    months = (datetime.date.today().year - created.year) * 12 + datetime.date.today().month - created.month
+
+    if months > fam['last_anniversary_month']:
+        reward = min(5 * months, 50)
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE families SET last_anniversary_month = $1 WHERE id = $2", months, user['family_id'])
+            await conn.execute("UPDATE users SET stars = stars + $1 WHERE user_id IN ($2, $3)", reward, user['user_id'], user['spouse_id'])
+        await message.answer(f"🎂 <b>ГОДОВЩИНА! {months} месяцев! +{reward}⭐ каждому!</b>", parse_mode="HTML")
     else:
-        await message.answer(HELP_TEXT, parse_mode="HTML")
+        await message.answer(f"📅 Вместе {months} месяцев. Следующая годовщина через {months - fam['last_anniversary_month']} мес.", parse_mode="HTML")
 
 # ============================================================
 # 🎰 РУЛЕТКА
@@ -1127,183 +1261,6 @@ async def process_join_tournament(callback: CallbackQuery):
     await callback.answer("✅ Ты в турнире!", show_alert=True)
 
 # ============================================================
-# 💍 СЕМЬЯ (БЕЗ КНОПОК)
-# ============================================================
-@router.message(F.text.lower().startswith("обручиться"))
-async def cmd_marry(message: Message):
-    if not message.reply_to_message:
-        await message.answer("❌ Ответь на сообщение того, с кем хочешь обручиться!", parse_mode="HTML")
-        return
-
-    u1 = await get_or_create_user(message.from_user.id, message.from_user.username)
-    u2 = await get_or_create_user(message.reply_to_message.from_user.id, message.reply_to_message.from_user.username)
-
-    # Проверка: не заняты ли
-    if u1['family_id']:
-        await message.answer("❌ Ты уже в браке!", parse_mode="HTML")
-        return
-    if u2['family_id']:
-        await message.answer("❌ Этот человек уже в браке!", parse_mode="HTML")
-        return
-
-    # Проверка: не сам с собой
-    if u1['user_id'] == u2['user_id']:
-        await message.answer("❌ Нельзя обручиться с самим собой!", parse_mode="HTML")
-        return
-
-    # Сохраняем запрос
-    marry_requests[u2['user_id']] = {
-        "from": u1['user_id'],
-        "from_name": u1['custom_nick'] or u1['username'] or message.from_user.first_name,
-        "chat_id": message.chat.id
-    }
-
-    # Отправляем предложение в ЛС второму игроку
-    try:
-        await bot.send_message(
-            u2['user_id'],
-            f"💍 <b>{marry_requests[u2['user_id']]['from_name']}</b> хочет обручиться с тобой!\n\n"
-            f"Напиши <b>да</b> — чтобы согласиться\n"
-            f"Напиши <b>нет</b> — чтобы отказаться",
-            parse_mode="HTML"
-        )
-        await message.answer(f"✅ Предложение отправлено <b>{u2['custom_nick'] or u2['username'] or 'пользователю'}</b> в ЛС!", parse_mode="HTML")
-    except Exception:
-        await message.answer("❌ Не могу отправить сообщение пользователю. Возможно, он не писал боту.", parse_mode="HTML")
-        if u2['user_id'] in marry_requests:
-            del marry_requests[u2['user_id']]
-
-@router.message(F.text.lower().in_(["да", "нет"]))
-async def process_marry_answer(message: Message):
-    # Проверяем, есть ли запрос для этого пользователя
-    if message.from_user.id not in marry_requests:
-        return
-
-    request = marry_requests[message.from_user.id]
-    answer = message.text.lower()
-
-    if answer == "нет":
-        await message.answer("💔 Ты отказался от предложения!", parse_mode="HTML")
-        # Уведомляем того, кто предлагал
-        try:
-            await bot.send_message(
-                request["from"],
-                f"💔 {message.from_user.first_name} отказался от предложения обручиться.",
-                parse_mode="HTML"
-            )
-        except:
-            pass
-        del marry_requests[message.from_user.id]
-        return
-
-    if answer == "да":
-        # Создаём семью
-        u1_id = request["from"]
-        u2_id = message.from_user.id
-        today = datetime.date.today().isoformat()
-
-        async with db_pool.acquire() as conn:
-            # Проверяем ещё раз, не заняты ли
-            u1 = await conn.fetchrow("SELECT family_id FROM users WHERE user_id = $1", u1_id)
-            u2 = await conn.fetchrow("SELECT family_id FROM users WHERE user_id = $1", u2_id)
-            if u1['family_id'] or u2['family_id']:
-                await message.answer("❌ Кто-то уже в браке! Возможно, пока ты думал, кто-то другой сделал предложение.", parse_mode="HTML")
-                del marry_requests[message.from_user.id]
-                return
-
-            fam_id = await conn.fetchval(
-                "INSERT INTO families (user1_id, user2_id, created_at) VALUES ($1, $2, $3) RETURNING id",
-                u1_id, u2_id, today
-            )
-            await conn.execute("UPDATE users SET family_id = $1, spouse_id = $2, stars = stars + 5 WHERE user_id IN ($3, $4)",
-                             fam_id, u2_id, u1_id, u2_id)
-
-        await message.answer("🎉 <b>ПОЗДРАВЛЯЮ! СЕМЬЯ СОЗДАНА! +5⭐ каждому!</b>", parse_mode="HTML")
-        try:
-            await bot.send_message(
-                u1_id,
-                f"🎉 <b>{message.from_user.first_name}</b> согласился на брак! Семья создана! +5⭐ каждому!",
-                parse_mode="HTML"
-            )
-        except:
-            pass
-        del marry_requests[message.from_user.id]
-
-@router.message(F.text.lower() == "развод")
-async def cmd_divorce(message: Message):
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    if not user['family_id']:
-        await message.answer("❌ Ты не в браке!", parse_mode="HTML")
-        return
-
-    ban_date = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
-    async with db_pool.acquire() as conn:
-        await conn.execute("DELETE FROM families WHERE id = $1", user['family_id'])
-        await conn.execute("UPDATE users SET family_id = NULL, spouse_id = NULL, divorce_until = $1 WHERE user_id IN ($2, $3)",
-                         ban_date, user['user_id'], user['spouse_id'])
-
-    await message.answer("💔 Развод! Бан на брак 7 дней.", parse_mode="HTML")
-
-@router.message(F.text.lower().startswith("ребёнок"))
-async def cmd_adopt(message: Message):
-    if not message.reply_to_message:
-        await message.answer("❌ Ответь на сообщение!", parse_mode="HTML")
-        return
-
-    parent = await get_or_create_user(message.from_user.id, message.from_user.username)
-    child = await get_or_create_user(message.reply_to_message.from_user.id, message.reply_to_message.from_user.username)
-
-    if not parent['family_id']:
-        await message.answer("❌ Сначала семья!", parse_mode="HTML")
-        return
-
-    async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO children (family_id, child_id) VALUES ($1, $2)", parent['family_id'], child['user_id'])
-
-    await message.answer(f"👶 {message.reply_to_message.from_user.first_name} усыновлён!", parse_mode="HTML")
-
-@router.message(F.text.lower() == "семья")
-async def cmd_family(message: Message):
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    if not user['family_id']:
-        await message.answer("❌ Нет семьи!", parse_mode="HTML")
-        return
-
-    async with db_pool.acquire() as conn:
-        fam = await conn.fetchrow("SELECT * FROM families WHERE id = $1", user['family_id'])
-
-    text = f"""💍 <b>СЕМЬЯ</b>
-📅 Создана: {fam['created_at']}
-⭐ Очки: {fam['score']}
-🎖️ Топ-1 раз: {fam['top1_count']}"""
-    await message.answer(text, parse_mode="HTML")
-
-# ============================================================
-# 🎂 ГОДОВЩИНА
-# ============================================================
-@router.message(F.text.lower() == "годовщина")
-async def cmd_anniversary(message: Message):
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    if not user['family_id']:
-        await message.answer("❌ Нет семьи!", parse_mode="HTML")
-        return
-
-    async with db_pool.acquire() as conn:
-        fam = await conn.fetchrow("SELECT created_at, last_anniversary_month FROM families WHERE id = $1", user['family_id'])
-
-    created = datetime.date.fromisoformat(fam['created_at'])
-    months = (datetime.date.today().year - created.year) * 12 + datetime.date.today().month - created.month
-
-    if months > fam['last_anniversary_month']:
-        reward = min(5 * months, 50)
-        async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE families SET last_anniversary_month = $1 WHERE id = $2", months, user['family_id'])
-            await conn.execute("UPDATE users SET stars = stars + $1 WHERE user_id IN ($2, $3)", reward, user['user_id'], user['spouse_id'])
-        await message.answer(f"🎂 <b>ГОДОВЩИНА! {months} месяцев! +{reward}⭐ каждому!</b>", parse_mode="HTML")
-    else:
-        await message.answer(f"📅 Вместе {months} месяцев. Следующая годовщина через {months - fam['last_anniversary_month']} мес.", parse_mode="HTML")
-
-# ============================================================
 # 🎫 ПРОМОКОДЫ (АДМИН)
 # ============================================================
 @router.message(Command("create_promo"))
@@ -1535,6 +1492,55 @@ async def admin_back(callback: CallbackQuery):
         [InlineKeyboardButton(text="🗑️ Удалить промокод", callback_data="admin_delete_promo")]
     ])
     await callback.message.edit_text("🛠️ <b>АДМИН-ПАНЕЛЬ</b>", reply_markup=kb, parse_mode="HTML")
+
+# ============================================================
+# ❓ ПОМОЩЬ (ДОЛЖЕН БЫТЬ САМЫМ ПОСЛЕДНИМ!)
+# ============================================================
+HELP_TEXT = """🎮 <b>ПОЛНЫЙ СПИСОК ВОЗМОЖНОСТЕЙ БОТА</b>
+
+⭐ Звёзды — ИГРОВАЯ ВАЛЮТА!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎲 <b>ИГРЫ</b>
+🎰 Рулетка — р / рулетка (красное, черное, чет, нечет, число)
+🤠 Дуэль — дуэль (сумма) — пошагово
+🐱 Котики — котики (сумма) — вызови соперника! Кто первый угадает — забирает банк
+🎰 Казино — казино — за 25⭐
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 <b>ЭКОНОМИКА</b>
+🎁 Приз — приз (1 раз/день, ТОЛЬКО в ЛС)
+🏪 Магазин — магазин
+⭐ Перевод — перевод @username (сумма) (макс 25⭐/день)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 <b>ПРОФИЛЬ И ТОПЫ</b>
+👤 Профиль — профиль / профиль @username
+📊 Статистика — статистика / стата
+🏆 Топы — топ, топ_семей
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💍 <b>СЕМЬЯ</b>
+💍 обручиться @username
+👶 ребёнок @username
+💔 развод
+👨‍👩‍👧‍👦 семья
+🎂 годовщина
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 <b>КВЕСТЫ И ТУРНИРЫ</b>
+🎯 квесты
+🏆 турнир
+"""
+
+@router.message(Command("start"))
+@router.message(F.text.lower().in_(["помощь", "help", "❓ помощь"]))
+async def cmd_help(message: Message):
+    await get_or_create_user(message.from_user.id, message.from_user.username)
+    if message.chat.type == ChatType.PRIVATE:
+        await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=get_main_keyboard())
+    else:
+        await message.answer(HELP_TEXT, parse_mode="HTML")
 
 # ============================================================
 # 🚀 ЗАПУСК
