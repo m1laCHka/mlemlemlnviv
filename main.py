@@ -90,7 +90,7 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 # ---------------------------------------------------------
-# БАЗА ДАННЫХ (POSTGRESQL) — БЕЗ УДАЛЕНИЯ ТАБЛИЦ
+# БАЗА ДАННЫХ (POSTGRESQL) — user_id как TEXT!
 # ---------------------------------------------------------
 async def init_db():
     global db_pool
@@ -115,9 +115,10 @@ async def init_db():
             
             print("🔄 СОЗДАЮ ТАБЛИЦЫ (если их нет)...")
             
+            # ⚠️ ВАЖНО: user_id теперь TEXT, а не BIGINT!
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                user_id BIGINT PRIMARY KEY,
+                user_id TEXT PRIMARY KEY,
                 username TEXT,
                 custom_nick TEXT DEFAULT NULL,
                 custom_emoji TEXT DEFAULT '',
@@ -159,8 +160,8 @@ async def init_db():
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS families (
                 id SERIAL PRIMARY KEY,
-                user1_id BIGINT,
-                user2_id BIGINT,
+                user1_id TEXT,
+                user2_id TEXT,
                 score BIGINT DEFAULT 0,
                 created_at TEXT,
                 top1_count BIGINT DEFAULT 0,
@@ -173,14 +174,14 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS children (
                 id SERIAL PRIMARY KEY,
                 family_id BIGINT,
-                child_id BIGINT
+                child_id TEXT
             );
             """)
             print("✅ Таблица children создана!")
             
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS achievements (
-                user_id BIGINT,
+                user_id TEXT,
                 ach_id TEXT,
                 PRIMARY KEY (user_id, ach_id)
             );
@@ -189,7 +190,7 @@ async def init_db():
             
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS user_quests (
-                user_id BIGINT,
+                user_id TEXT,
                 quest_id BIGINT,
                 progress BIGINT DEFAULT 0,
                 completed BIGINT DEFAULT 0,
@@ -200,7 +201,7 @@ async def init_db():
             
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS tournament (
-                user_id BIGINT PRIMARY KEY,
+                user_id TEXT PRIMARY KEY,
                 wins BIGINT DEFAULT 0,
                 fee_paid BIGINT DEFAULT 0
             );
@@ -221,7 +222,7 @@ async def init_db():
             
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS user_promos (
-                user_id BIGINT,
+                user_id TEXT,
                 code TEXT,
                 PRIMARY KEY (user_id, code)
             );
@@ -237,18 +238,19 @@ async def init_db():
 
 async def get_or_create_user(user_id: int, username: Optional[str]) -> dict:
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+        user_id_str = str(user_id)  # <--- Превращаем в строку!
+        row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id_str)
         today = datetime.date.today().isoformat()
         if not row:
             await conn.execute(
                 "INSERT INTO users (user_id, username, last_active_date) VALUES ($1, $2, $3)",
-                user_id, username or f"Игрок_{user_id}", today
+                user_id_str, username or f"Игрок_{user_id}", today
             )
-            row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+            row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id_str)
         else:
             if username and row['username'] != username:
-                await conn.execute("UPDATE users SET username = $1 WHERE user_id = $2", username, user_id)
-                row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+                await conn.execute("UPDATE users SET username = $1 WHERE user_id = $2", username, user_id_str)
+                row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id_str)
         return dict(row)
 
 # ---------------------------------------------------------
@@ -285,10 +287,11 @@ async def get_user_titles(user: dict) -> list:
 
 async def check_achievements(user_id: int):
     async with db_pool.acquire() as conn:
-        u = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+        user_id_str = str(user_id)
+        u = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id_str)
         if not u: return
 
-        unlocked = {r['ach_id'] async for r in conn.cursor("SELECT ach_id FROM achievements WHERE user_id = $1", user_id)}
+        unlocked = {r['ach_id'] async for r in conn.cursor("SELECT ach_id FROM achievements WHERE user_id = $1", user_id_str)}
 
         ach_data = [
             ("first_step", u['total_games'] >= 1, 10, 0, "🆕 Первый шаг"),
@@ -307,8 +310,8 @@ async def check_achievements(user_id: int):
 
         for ach_id, cond, r_coins, r_stars, title in ach_data:
             if cond and ach_id not in unlocked:
-                await conn.execute("INSERT INTO achievements (user_id, ach_id) VALUES ($1, $2)", user_id, ach_id)
-                await conn.execute("UPDATE users SET coins = coins + $1, stars = stars + $2 WHERE user_id = $3", r_coins, r_stars, user_id)
+                await conn.execute("INSERT INTO achievements (user_id, ach_id) VALUES ($1, $2)", user_id_str, ach_id)
+                await conn.execute("UPDATE users SET coins = coins + $1, stars = stars + $2 WHERE user_id = $3", r_coins, r_stars, user_id_str)
                 try:
                     await bot.send_message(user_id, f"🏆 АЧИВКА! {title}\n+{r_coins}💰, +{r_stars}⭐")
                 except Exception:
@@ -358,8 +361,8 @@ async def process_marry_answer(message: Message):
 
     if answer == "да":
         print("✅ СОГЛАСИЕ НА БРАК!")
-        u1_id = request["from"]
-        u2_id = message.from_user.id
+        u1_id = str(request["from"])
+        u2_id = str(message.from_user.id)
         today = datetime.date.today().isoformat()
 
         async with db_pool.acquire() as conn:
@@ -382,7 +385,7 @@ async def process_marry_answer(message: Message):
         await message.answer("🎉 <b>ПОЗДРАВЛЯЮ! СЕМЬЯ СОЗДАНА! +5⭐ каждому!</b>", parse_mode="HTML")
         try:
             await bot.send_message(
-                u1_id,
+                int(u1_id),
                 f"🎉 <b>{message.from_user.first_name}</b> согласился на брак! Семья создана! +5⭐ каждому!",
                 parse_mode="HTML"
             )
@@ -413,8 +416,8 @@ async def cmd_marry(message: Message):
         return
 
     # Сохраняем запрос
-    marry_requests[u2['user_id']] = {
-        "from": u1['user_id'],
+    marry_requests[int(u2['user_id'])] = {
+        "from": int(u1['user_id']),
         "from_name": u1['custom_nick'] or u1['username'] or message.from_user.first_name,
         "chat_id": message.chat.id
     }
@@ -425,8 +428,8 @@ async def cmd_marry(message: Message):
     # Отправляем предложение в ЛС второму игроку
     try:
         await bot.send_message(
-            u2['user_id'],
-            f"💍 <b>{marry_requests[u2['user_id']]['from_name']}</b> хочет обручиться с тобой!\n\n"
+            int(u2['user_id']),
+            f"💍 <b>{marry_requests[int(u2['user_id'])]['from_name']}</b> хочет обручиться с тобой!\n\n"
             f"Напиши <b>да</b> — чтобы согласиться\n"
             f"Напиши <b>нет</b> — чтобы отказаться",
             parse_mode="HTML"
@@ -435,8 +438,8 @@ async def cmd_marry(message: Message):
     except Exception as e:
         print(f"❌ Ошибка отправки в ЛС: {e}")
         await message.answer("❌ Не могу отправить сообщение пользователю. Возможно, он не писал боту.", parse_mode="HTML")
-        if u2['user_id'] in marry_requests:
-            del marry_requests[u2['user_id']]
+        if int(u2['user_id']) in marry_requests:
+            del marry_requests[int(u2['user_id'])]
 
 @router.message(F.text.lower() == "развод")
 async def cmd_divorce(message: Message):
@@ -447,9 +450,11 @@ async def cmd_divorce(message: Message):
 
     ban_date = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
     async with db_pool.acquire() as conn:
+        user_id_str = str(user['user_id'])
+        spouse_id_str = str(user['spouse_id'])
         await conn.execute("DELETE FROM families WHERE id = $1", user['family_id'])
         await conn.execute("UPDATE users SET family_id = NULL, spouse_id = NULL, divorce_until = $1 WHERE user_id IN ($2, $3)",
-                         ban_date, user['user_id'], user['spouse_id'])
+                         ban_date, user_id_str, spouse_id_str)
 
     await message.answer("💔 Развод! Бан на брак 7 дней.", parse_mode="HTML")
 
@@ -467,7 +472,7 @@ async def cmd_adopt(message: Message):
         return
 
     async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO children (family_id, child_id) VALUES ($1, $2)", parent['family_id'], child['user_id'])
+        await conn.execute("INSERT INTO children (family_id, child_id) VALUES ($1, $2)", parent['family_id'], str(child['user_id']))
 
     await message.answer(f"👶 {message.reply_to_message.from_user.first_name} усыновлён!", parse_mode="HTML")
 
@@ -504,7 +509,9 @@ async def cmd_anniversary(message: Message):
         reward = min(5 * months, 50)
         async with db_pool.acquire() as conn:
             await conn.execute("UPDATE families SET last_anniversary_month = $1 WHERE id = $2", months, user['family_id'])
-            await conn.execute("UPDATE users SET stars = stars + $1 WHERE user_id IN ($2, $3)", reward, user['user_id'], user['spouse_id'])
+            user_id_str = str(user['user_id'])
+            spouse_id_str = str(user['spouse_id'])
+            await conn.execute("UPDATE users SET stars = stars + $1 WHERE user_id IN ($2, $3)", reward, user_id_str, spouse_id_str)
         await message.answer(f"🎂 <b>ГОДОВЩИНА! {months} месяцев! +{reward}⭐ каждому!</b>", parse_mode="HTML")
     else:
         await message.answer(f"📅 Вместе {months} месяцев. Следующая годовщина через {months - fam['last_anniversary_month']} мес.", parse_mode="HTML")
@@ -551,7 +558,7 @@ async def cmd_roulette(message: Message):
         return
 
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", bet_amount, user['user_id'])
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", bet_amount, str(user['user_id']))
 
     if chat_id not in active_roulettes:
         active_roulettes[chat_id] = {"bets": [], "timer_task": asyncio.create_task(run_roulette_timer(chat_id))}
@@ -591,6 +598,7 @@ async def run_roulette_timer(chat_id: int):
         for b in bets:
             uid, uname, b_type, amount = b["user_id"], b["username"], b["type"], b["amount"]
             won, mult = False, 0
+            uid_str = str(uid)
 
             if b_type in ["красное", "red"] and is_red: won, mult = True, 2
             elif b_type in ["черное", "black"] and (not is_red and not is_zero): won, mult = True, 2
@@ -603,14 +611,14 @@ async def run_roulette_timer(chat_id: int):
                 win_coins = amount * mult
                 await conn.execute("""UPDATE users SET coins = coins + $1, wins = wins + 1, total_games = total_games + 1,
                     roulette_games = roulette_games + 1, roulette_wins = roulette_wins + 1, total_coins_won = total_coins_won + $1
-                    WHERE user_id = $2""", win_coins, uid)
+                    WHERE user_id = $2""", win_coins, uid_str)
                 res_text += f"✅ {uname}: +{win_coins}💰\n"
             else:
                 refund = (amount // 2) if b["insurance"] == 1 else 0
                 if refund > 0:
-                    await conn.execute("UPDATE users SET coins = coins + $1, insurance = 0 WHERE user_id = $2", refund, uid)
+                    await conn.execute("UPDATE users SET coins = coins + $1, insurance = 0 WHERE user_id = $2", refund, uid_str)
 
-                await conn.execute("UPDATE users SET losses = losses + 1, total_games = total_games + 1, roulette_games = roulette_games + 1 WHERE user_id = $1", uid)
+                await conn.execute("UPDATE users SET losses = losses + 1, total_games = total_games + 1, roulette_games = roulette_games + 1 WHERE user_id = $1", uid_str)
                 res_text += f"❌ {uname}: -{amount}💰 {'(страховка)' if refund else ''}\n"
 
     await bot.send_message(chat_id, res_text, parse_mode="HTML")
@@ -673,8 +681,8 @@ async def process_accept_duel(callback: CallbackQuery):
         return
 
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", duel["amount"], p1_id)
-        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", duel["amount"], p2_id)
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", duel["amount"], str(p1_id))
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", duel["amount"], str(p2_id))
 
     p2_name = p2_user['custom_nick'] or p2_user['username'] or callback.from_user.first_name
     duel["p2"] = p2_id
@@ -720,12 +728,12 @@ async def process_shoot(callback: CallbackQuery):
         winner_id, loser_id = shooter_id, target_id
         
         async with db_pool.acquire() as conn:
-            winner = await conn.fetchrow("SELECT is_vip FROM users WHERE user_id = $1", winner_id)
+            winner = await conn.fetchrow("SELECT is_vip FROM users WHERE user_id = $1", str(winner_id))
             commission = 0 if winner['is_vip'] == 1 else 0.1
             win_amt = int(duel["pot"] * (1 - commission))
             
-            await conn.execute("UPDATE users SET coins = coins + $1, wins = wins + 1, duel_games = duel_games + 1, duel_wins = duel_wins + 1 WHERE user_id = $2", win_amt, winner_id)
-            await conn.execute("UPDATE users SET losses = losses + 1, duel_games = duel_games + 1 WHERE user_id = $1", loser_id)
+            await conn.execute("UPDATE users SET coins = coins + $1, wins = wins + 1, duel_games = duel_games + 1, duel_wins = duel_wins + 1 WHERE user_id = $2", win_amt, str(winner_id))
+            await conn.execute("UPDATE users SET losses = losses + 1, duel_games = duel_games + 1 WHERE user_id = $1", str(loser_id))
 
         del active_duels[duel_id]
         await callback.message.edit_text(f"💀 {shooter_name} убивает {target_name}!\n🏆 {shooter_name} +{win_amt}💰", parse_mode="HTML")
@@ -800,8 +808,8 @@ async def process_accept_cats(callback: CallbackQuery):
         return
 
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", game["bet"], p1_id)
-        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", game["bet"], p2_id)
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", game["bet"], str(p1_id))
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", game["bet"], str(p2_id))
 
     game["p2"] = p2_id
     game["p2_name"] = p2_user['custom_nick'] or p2_user['username'] or callback.from_user.first_name
@@ -842,14 +850,14 @@ async def process_cats_answer(message: Message):
             game["winner"] = user_id
             
             async with db_pool.acquire() as conn:
-                winner = await conn.fetchrow("SELECT is_vip FROM users WHERE user_id = $1", user_id)
+                winner = await conn.fetchrow("SELECT is_vip FROM users WHERE user_id = $1", str(user_id))
                 commission = 0 if winner['is_vip'] == 1 else 0.1
                 win_pot = int(game["pot"] * (1 - commission))
                 
                 await conn.execute("""UPDATE users SET coins = coins + $1, wins = wins + 1, total_games = total_games + 1,
-                    cat_games = cat_games + 1, cat_wins = cat_wins + 1 WHERE user_id = $2""", win_pot, user_id)
+                    cat_games = cat_games + 1, cat_wins = cat_wins + 1 WHERE user_id = $2""", win_pot, str(user_id))
                 loser_id = game["p2"] if user_id == game["p1"] else game["p1"]
-                await conn.execute("UPDATE users SET losses = losses + 1, cat_games = cat_games + 1 WHERE user_id = $1", loser_id)
+                await conn.execute("UPDATE users SET losses = losses + 1, cat_games = cat_games + 1 WHERE user_id = $1", str(loser_id))
             
             uname = game["p1_name"] if user_id == game["p1"] else game["p2_name"]
             await message.answer(f"🎉 {uname} угадал! Жёлтых котиков было {val}.\n+{win_pot}💰", parse_mode="HTML")
@@ -868,30 +876,30 @@ async def cmd_casino(message: Message):
 
     rand = random.random()
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET stars = stars - 25, casino_games = casino_games + 1 WHERE user_id = $1", user['user_id'])
+        await conn.execute("UPDATE users SET stars = stars - 25, casino_games = casino_games + 1 WHERE user_id = $1", str(user['user_id']))
 
         if rand < 0.40:
             win_c = random.randint(50, 3000)
-            await conn.execute("UPDATE users SET coins = coins + $1, wins = wins + 1 WHERE user_id = $2", win_c, user['user_id'])
+            await conn.execute("UPDATE users SET coins = coins + $1, wins = wins + 1 WHERE user_id = $2", win_c, str(user['user_id']))
             result = "💰 Монеты"
             reward = f"+{win_c}💰"
             chance = "40%"
         elif rand < 0.70:
             days = random.randint(4, 10)
             until = (datetime.date.today() + datetime.timedelta(days=days)).isoformat()
-            await conn.execute("UPDATE users SET is_vip = 1, vip_until = $1, wins = wins + 1 WHERE user_id = $2", until, user['user_id'])
+            await conn.execute("UPDATE users SET is_vip = 1, vip_until = $1, wins = wins + 1 WHERE user_id = $2", until, str(user['user_id']))
             result = "👑 VIP"
             reward = f"на {days} дней!"
             chance = "30%"
         elif rand < 0.99:
             win_s = random.randint(10, 75)
-            await conn.execute("UPDATE users SET stars = stars + $1, wins = wins + 1 WHERE user_id = $2", win_s, user['user_id'])
+            await conn.execute("UPDATE users SET stars = stars + $1, wins = wins + 1 WHERE user_id = $2", win_s, str(user['user_id']))
             result = "⭐ Звёзды"
             reward = f"+{win_s}⭐"
             chance = "29%"
         else:
             until = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
-            await conn.execute("UPDATE users SET coins = coins + 5000, stars = stars + 50, is_vip = 1, vip_until = $1, wins = wins + 1 WHERE user_id = $2", until, user['user_id'])
+            await conn.execute("UPDATE users SET coins = coins + 5000, stars = stars + 50, is_vip = 1, vip_until = $1, wins = wins + 1 WHERE user_id = $2", until, str(user['user_id']))
             result = "🔥 ДЖЕКПОТ!"
             reward = "5000💰 + 50⭐ + VIP 30 дней!"
             chance = "1%"
@@ -945,7 +953,7 @@ async def process_chest(callback: CallbackQuery):
 
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET coins = coins + $1, stars = stars + $2, last_prize_date = $3 WHERE user_id = $4",
-                         win_coins, win_stars, today, callback.from_user.id)
+                         win_coins, win_stars, today, str(callback.from_user.id))
 
     text = f"🎉 Сундук #{chosen}\n+{win_coins}💰 +{win_stars}⭐\n\nОстальные:\n"
     for idx, (c, s) in enumerate(rewards, 1):
@@ -993,8 +1001,8 @@ async def cmd_transfer(message: Message):
             return
 
         await conn.execute("UPDATE users SET stars = stars - $1, daily_stars_transferred = $2, last_transfer_date = $3 WHERE user_id = $4",
-                         amount, transferred + amount, today, message.from_user.id)
-        await conn.execute("UPDATE users SET stars = stars + $1 WHERE user_id = $2", amount, target['user_id'])
+                         amount, transferred + amount, today, str(message.from_user.id))
+        await conn.execute("UPDATE users SET stars = stars + $1 WHERE user_id = $2", amount, str(target['user_id']))
 
     await message.answer(f"✅ +{amount}⭐ для @{target_uname}!", parse_mode="HTML")
 
@@ -1025,19 +1033,20 @@ async def cmd_shop(message: Message):
 async def process_shop(callback: CallbackQuery):
     user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
     async with db_pool.acquire() as conn:
+        user_id_str = str(user['user_id'])
         if callback.data == "buy_vip_1" and user['stars'] >= 5:
             until = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
-            await conn.execute("UPDATE users SET stars = stars - 5, is_vip = 1, vip_until = $1 WHERE user_id = $2", until, user['user_id'])
+            await conn.execute("UPDATE users SET stars = stars - 5, is_vip = 1, vip_until = $1 WHERE user_id = $2", until, user_id_str)
             await callback.answer("✅ VIP 1 день!", show_alert=True)
         elif callback.data == "buy_vip_7" and user['stars'] >= 30:
             until = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
-            await conn.execute("UPDATE users SET stars = stars - 30, is_vip = 1, vip_until = $1 WHERE user_id = $2", until, user['user_id'])
+            await conn.execute("UPDATE users SET stars = stars - 30, is_vip = 1, vip_until = $1 WHERE user_id = $2", until, user_id_str)
             await callback.answer("✅ VIP 7 дней!", show_alert=True)
         elif callback.data == "buy_ins" and user['stars'] >= 5:
-            await conn.execute("UPDATE users SET stars = stars - 5, insurance = 1 WHERE user_id = $1", user['user_id'])
+            await conn.execute("UPDATE users SET stars = stars - 5, insurance = 1 WHERE user_id = $1", user_id_str)
             await callback.answer("✅ Страховка!", show_alert=True)
         elif callback.data == "buy_ex" and user['stars'] >= 1:
-            await conn.execute("UPDATE users SET stars = stars - 1, coins = coins + 50 WHERE user_id = $1", user['user_id'])
+            await conn.execute("UPDATE users SET stars = stars - 1, coins = coins + 50 WHERE user_id = $1", user_id_str)
             await callback.answer("✅ +50💰!", show_alert=True)
         else:
             await callback.answer("❌ Недостаточно звёзд!", show_alert=True)
@@ -1063,7 +1072,7 @@ async def cmd_change_nick(message: Message):
         return
 
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET stars = stars - 10, custom_nick = $1 WHERE user_id = $2", new_nick, message.from_user.id)
+        await conn.execute("UPDATE users SET stars = stars - 10, custom_nick = $1 WHERE user_id = $2", new_nick, str(message.from_user.id))
 
     await message.answer(f"✅ Ник изменён на: {new_nick}", parse_mode="HTML")
 
@@ -1078,14 +1087,14 @@ async def cmd_hide_profile(message: Message):
         return
 
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET stars = stars - 1000, is_hidden = 1 WHERE user_id = $1", message.from_user.id)
+        await conn.execute("UPDATE users SET stars = stars - 1000, is_hidden = 1 WHERE user_id = $1", str(message.from_user.id))
 
     await message.answer("🔒 Профиль скрыт за 1000⭐!", parse_mode="HTML")
 
 @router.message(F.text.lower() == "открыть_профиль")
 async def cmd_unhide_profile(message: Message):
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET is_hidden = 0 WHERE user_id = $1", message.from_user.id)
+        await conn.execute("UPDATE users SET is_hidden = 0 WHERE user_id = $1", str(message.from_user.id))
     await message.answer("🔓 Профиль открыт!", parse_mode="HTML")
 
 # ============================================================
@@ -1184,7 +1193,7 @@ async def cmd_top(message: Message):
     ]])
     async with db_pool.acquire() as conn:
         # Исключаем админа из топа
-        rows = await conn.fetch("SELECT user_id, username, custom_nick, wins, coins, is_hidden FROM users WHERE user_id != $1 ORDER BY wins DESC LIMIT 10", ADMIN_ID)
+        rows = await conn.fetch("SELECT user_id, username, custom_nick, wins, coins, is_hidden FROM users WHERE user_id != $1 ORDER BY wins DESC LIMIT 10", str(ADMIN_ID))
 
     text = "🏆 <b>ТОП ИГРОКОВ:</b>\n\n"
     for idx, r in enumerate(rows, start=1):
@@ -1255,8 +1264,8 @@ async def process_join_tournament(callback: CallbackQuery):
         return
 
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET stars = stars - 10 WHERE user_id = $1", user['user_id'])
-        await conn.execute("INSERT INTO tournament (user_id, fee_paid) VALUES ($1, 1) ON CONFLICT (user_id) DO UPDATE SET fee_paid = 1", user['user_id'])
+        await conn.execute("UPDATE users SET stars = stars - 10 WHERE user_id = $1", str(user['user_id']))
+        await conn.execute("INSERT INTO tournament (user_id, fee_paid) VALUES ($1, 1) ON CONFLICT (user_id) DO UPDATE SET fee_paid = 1", str(user['user_id']))
 
     await callback.answer("✅ Ты в турнире!", show_alert=True)
 
@@ -1298,10 +1307,10 @@ async def cmd_use_promo(message: Message, command: CommandObject):
             await message.answer("❌ Промокод уже использован!", parse_mode="HTML")
             return
         await conn.execute("UPDATE promos SET uses = uses + 1 WHERE code = $1", code)
-        await conn.execute("UPDATE users SET stars = stars + $1, coins = coins + $2 WHERE user_id = $3", p['stars'], p['coins'], uid)
+        await conn.execute("UPDATE users SET stars = stars + $1, coins = coins + $2 WHERE user_id = $3", p['stars'], p['coins'], str(uid))
         if p['vip_days'] > 0:
             until = (datetime.date.today() + datetime.timedelta(days=p['vip_days'])).isoformat()
-            await conn.execute("UPDATE users SET is_vip = 1, vip_until = $1 WHERE user_id = $2", until, uid)
+            await conn.execute("UPDATE users SET is_vip = 1, vip_until = $1 WHERE user_id = $2", until, str(uid))
     await message.answer(
         f"🎉 <b>Промокод активирован!</b>\n"
         f"💰 +{p['coins']}💰\n"
@@ -1397,7 +1406,7 @@ async def cmd_give_vip(message: Message, command: CommandObject):
             await message.answer("❌ Пользователь не найден!", parse_mode="HTML")
             return
         until = (datetime.date.today() + datetime.timedelta(days=days)).isoformat()
-        await conn.execute("UPDATE users SET is_vip = 1, vip_until = $1 WHERE user_id = $2", until, target['user_id'])
+        await conn.execute("UPDATE users SET is_vip = 1, vip_until = $1 WHERE user_id = $2", until, str(target['user_id']))
     await message.answer(f"✅ @{target_uname} получил VIP на {days} дней!", parse_mode="HTML")
 
 # -------------------- УПРАВЛЕНИЕ ПРОМОКОДАМИ --------------------
