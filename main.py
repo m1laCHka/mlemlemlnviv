@@ -58,7 +58,6 @@ async def start_web_server():
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     kb = [
         [KeyboardButton(text="🎰 Казино"), KeyboardButton(text="🎁 Приз"), KeyboardButton(text="🏪 Магазин")],
-        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="📊 Статистика"), KeyboardButton(text="⭐ Перевод")],
         [KeyboardButton(text="🏆 Топ"), KeyboardButton(text="💍 Семья"), KeyboardButton(text="🎯 Квесты")],
         [KeyboardButton(text="🏆 Турнир"), KeyboardButton(text="❓ Помощь")]
     ]
@@ -83,6 +82,7 @@ async def init_db():
             stars INT DEFAULT 10,
             is_vip INT DEFAULT 0,
             vip_until TEXT DEFAULT NULL,
+            vip_start_date TEXT DEFAULT NULL,
             is_hidden INT DEFAULT 0,
             insurance INT DEFAULT 0,
             family_id INT DEFAULT NULL,
@@ -255,6 +255,18 @@ async def check_achievements(user_id: int):
                     await bot.send_message(user_id, f"🏆 АЧИВКА! {title}\n+{r_coins}💰, +{r_stars}⭐")
                 except Exception:
                     pass
+
+async def get_vip_days(user: dict) -> str:
+    if not user['is_vip']:
+        return "0"
+    if user['vip_until']:
+        try:
+            until = datetime.date.fromisoformat(user['vip_until'])
+            days = (until - datetime.date.today()).days
+            return str(max(0, days))
+        except:
+            return "∞"
+    return "∞"
 
 # ---------------------------------------------------------
 # ПОМОЩЬ
@@ -669,20 +681,36 @@ async def cmd_casino(message: Message):
         if rand < 0.40:
             win_c = random.randint(50, 3000)
             await conn.execute("UPDATE users SET coins = coins + $1, wins = wins + 1 WHERE user_id = $2", win_c, user['user_id'])
-            res = f"💰 +{win_c} монет!"
+            result = "💰 Монеты"
+            reward = f"+{win_c}💰"
+            chance = "40%"
         elif rand < 0.70:
             days = random.randint(4, 10)
-            await conn.execute("UPDATE users SET is_vip = 1, wins = wins + 1 WHERE user_id = $1", user['user_id'])
-            res = f"👑 VIP на {days} дней!"
+            until = (datetime.date.today() + datetime.timedelta(days=days)).isoformat()
+            await conn.execute("UPDATE users SET is_vip = 1, vip_until = $1, wins = wins + 1 WHERE user_id = $2", until, user['user_id'])
+            result = "👑 VIP"
+            reward = f"на {days} дней!"
+            chance = "30%"
         elif rand < 0.99:
             win_s = random.randint(10, 75)
             await conn.execute("UPDATE users SET stars = stars + $1, wins = wins + 1 WHERE user_id = $2", win_s, user['user_id'])
-            res = f"⭐ +{win_s} звёзд!"
+            result = "⭐ Звёзды"
+            reward = f"+{win_s}⭐"
+            chance = "29%"
         else:
-            await conn.execute("UPDATE users SET coins = coins + 5000, stars = stars + 50, is_vip = 1, wins = wins + 1 WHERE user_id = $1", user['user_id'])
-            res = "🔥 ДЖЕКПОТ! 5000💰 + 50⭐ + VIP!"
+            until = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+            await conn.execute("UPDATE users SET coins = coins + 5000, stars = stars + 50, is_vip = 1, vip_until = $1, wins = wins + 1 WHERE user_id = $2", until, user['user_id'])
+            result = "🔥 ДЖЕКПОТ!"
+            reward = "5000💰 + 50⭐ + VIP 30 дней!"
+            chance = "1%"
 
-    await message.answer(f"🎰 Казино (-25⭐)\n\n{res}", parse_mode="HTML")
+    await message.answer(
+        f"🎰 <b>КАЗИНО</b> (-25⭐)\n\n"
+        f"🎯 <b>Выпало:</b> {result}\n"
+        f"📊 <b>Вероятность:</b> {chance}\n"
+        f"💰 <b>Награда:</b> {reward}",
+        parse_mode="HTML"
+    )
 
 # ============================================================
 # 🎁 ПРИЗ (ТОЛЬКО В ЛС)
@@ -806,10 +834,12 @@ async def process_shop(callback: CallbackQuery):
     user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
     async with db_pool.acquire() as conn:
         if callback.data == "buy_vip_1" and user['stars'] >= 5:
-            await conn.execute("UPDATE users SET stars = stars - 5, is_vip = 1 WHERE user_id = $1", user['user_id'])
+            until = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+            await conn.execute("UPDATE users SET stars = stars - 5, is_vip = 1, vip_until = $1 WHERE user_id = $2", until, user['user_id'])
             await callback.answer("✅ VIP 1 день!", show_alert=True)
         elif callback.data == "buy_vip_7" and user['stars'] >= 30:
-            await conn.execute("UPDATE users SET stars = stars - 30, is_vip = 1 WHERE user_id = $1", user['user_id'])
+            until = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
+            await conn.execute("UPDATE users SET stars = stars - 30, is_vip = 1, vip_until = $1 WHERE user_id = $2", until, user['user_id'])
             await callback.answer("✅ VIP 7 дней!", show_alert=True)
         elif callback.data == "buy_ins" and user['stars'] >= 5:
             await conn.execute("UPDATE users SET stars = stars - 5, insurance = 1 WHERE user_id = $1", user['user_id'])
@@ -886,6 +916,7 @@ async def cmd_profile(message: Message):
     
     rank = calculate_rank(user['wins'], user['total_games'])
     display_name = user['custom_nick'] or user['username'] or f"Игрок_{user['user_id']}"
+    vip_days = await get_vip_days(user)
 
     games_data = [
         ("🎰 Рулетка", user['roulette_wins'], user['roulette_games']),
@@ -915,6 +946,7 @@ async def cmd_profile(message: Message):
         f"👤 <b>Профиль:</b> {display_name}\n"
         f"🎖️ <b>Ранг:</b> {rank}\n"
         f"💳 <b>Статус:</b> {'👑 VIP' if user['is_vip'] else 'Обычный'}\n"
+        f"👑 <b>VIP дней:</b> {vip_days}\n"
         f"💰 <b>Монеты:</b> {user['coins']:,}\n"
         f"⭐ <b>Звёзды:</b> {user['stars']}\n"
         f"🎖️ <b>Титулы:</b> {titles_str}\n"
@@ -1027,7 +1059,7 @@ async def process_join_tournament(callback: CallbackQuery):
     await callback.answer("✅ Ты в турнире!", show_alert=True)
 
 # ============================================================
-# 💍 СЕМЬЯ
+# 💍 СЕМЬЯ (ИСПРАВЛЕНА КНОПКА "ДА")
 # ============================================================
 @router.message(F.text.lower().startswith("обручиться"))
 async def cmd_marry(message: Message):
@@ -1043,18 +1075,24 @@ async def cmd_marry(message: Message):
         return
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="❤️ Да", callback_data=f"marry_{u1['user_id']}_{u2['user_id']}"),
+        InlineKeyboardButton(text="❤️ Да", callback_data=f"marry_yes_{u1['user_id']}_{u2['user_id']}"),
         InlineKeyboardButton(text="💔 Нет", callback_data="marry_no")
     ]])
     await message.answer(f"💍 {message.reply_to_message.from_user.first_name}, согласие?", reply_markup=kb)
 
-@router.callback_query(F.data.startswith("marry_"))
+@router.callback_query(F.data.startswith("marry_yes_"))
 async def process_marry(callback: CallbackQuery):
     if callback.data == "marry_no":
         await callback.message.delete()
         return
 
-    _, u1, u2 = callback.data.split("_")
+    # Извлекаем id из callback_data
+    parts = callback.data.split("_")
+    if len(parts) != 4:
+        await callback.answer("Ошибка!", show_alert=True)
+        return
+    
+    _, _, u1, u2 = parts
     u1, u2 = int(u1), int(u2)
 
     if callback.from_user.id != u2:
@@ -1153,12 +1191,21 @@ async def cmd_create_promo(message: Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID: return
     args = command.args.split() if command.args else []
     if len(args) < 3:
-        await message.answer("Формат: /create_promo КОД ЗВЕЗДЫ МОНЕТЫ", parse_mode="HTML")
+        await message.answer(
+            "Формат: /create_promo КОД ЗВЕЗДЫ МОНЕТЫ VIP_ДНЕЙ\n"
+            "Пример: /create_promo HAPPY100 5 1000 7",
+            parse_mode="HTML"
+        )
         return
     code, stars, coins = args[0], int(args[1]), int(args[2])
+    vip_days = int(args[3]) if len(args) > 3 else 0
     async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO promos (code, stars, coins, max_uses) VALUES ($1, $2, $3, 100) ON CONFLICT (code) DO UPDATE SET stars = $2, coins = $3", code, stars, coins)
-    await message.answer(f"✅ Промокод <b>{code}</b> создан!", parse_mode="HTML")
+        await conn.execute(
+            "INSERT INTO promos (code, stars, coins, vip_days, max_uses) VALUES ($1, $2, $3, $4, 100) "
+            "ON CONFLICT (code) DO UPDATE SET stars = $2, coins = $3, vip_days = $4",
+            code, stars, coins, vip_days
+        )
+    await message.answer(f"✅ Промокод <b>{code}</b> создан!\n⭐ +{stars}⭐\n💰 +{coins}💰\n👑 VIP {vip_days} дн.", parse_mode="HTML")
 
 @router.message(Command("promo"))
 async def cmd_use_promo(message: Message, command: CommandObject):
@@ -1170,8 +1217,109 @@ async def cmd_use_promo(message: Message, command: CommandObject):
         if not p:
             await message.answer("❌ Нет такого промокода!", parse_mode="HTML")
             return
+        if p['uses'] >= p['max_uses']:
+            await message.answer("❌ Промокод уже использован!", parse_mode="HTML")
+            return
+        await conn.execute("UPDATE promos SET uses = uses + 1 WHERE code = $1", code)
         await conn.execute("UPDATE users SET stars = stars + $1, coins = coins + $2 WHERE user_id = $3", p['stars'], p['coins'], uid)
-    await message.answer(f"🎉 <b>+{p['coins']}💰 +{p['stars']}⭐!</b>", parse_mode="HTML")
+        if p['vip_days'] > 0:
+            until = (datetime.date.today() + datetime.timedelta(days=p['vip_days'])).isoformat()
+            await conn.execute("UPDATE users SET is_vip = 1, vip_until = $1 WHERE user_id = $2", until, uid)
+    await message.answer(
+        f"🎉 <b>Промокод активирован!</b>\n"
+        f"💰 +{p['coins']}💰\n"
+        f"⭐ +{p['stars']}⭐\n"
+        f"👑 VIP +{p['vip_days']} дн.",
+        parse_mode="HTML"
+    )
+
+# ============================================================
+# 🛠️ АДМИН-ПАНЕЛЬ
+# ============================================================
+@router.message(Command("admin"))
+async def cmd_admin(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У тебя нет доступа!", parse_mode="HTML")
+        return
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎫 Создать промокод", callback_data="admin_promo")],
+        [InlineKeyboardButton(text="📊 Статистика бота", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="👑 Выдать VIP", callback_data="admin_vip")]
+    ])
+    await message.answer("🛠️ <b>АДМИН-ПАНЕЛЬ</b>", reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data == "admin_promo")
+async def admin_promo(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ Нет доступа!", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "🎫 <b>Создание промокода</b>\n\n"
+        "Отправь команду:\n"
+        "<code>/create_promo КОД ЗВЕЗДЫ МОНЕТЫ VIP_ДНЕЙ</code>\n\n"
+        "📝 Пример:\n"
+        "<code>/create_promo HAPPY100 5 1000 7</code>\n"
+        "→ +5⭐, +1000💰, VIP на 7 дней",
+        parse_mode="HTML"
+    )
+
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ Нет доступа!", show_alert=True)
+        return
+    async with db_pool.acquire() as conn:
+        users = await conn.fetchval("SELECT COUNT(*) FROM users")
+        total_coins = await conn.fetchval("SELECT COALESCE(SUM(coins), 0) FROM users")
+        total_stars = await conn.fetchval("SELECT COALESCE(SUM(stars), 0) FROM users")
+    await callback.message.edit_text(
+        f"📊 <b>СТАТИСТИКА БОТА</b>\n\n"
+        f"👤 <b>Всего игроков:</b> {users}\n"
+        f"💰 <b>Всего монет:</b> {total_coins:,}\n"
+        f"⭐ <b>Всего звёзд:</b> {total_stars:,}",
+        parse_mode="HTML"
+    )
+
+@router.callback_query(F.data == "admin_vip")
+async def admin_vip(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ Нет доступа!", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "👑 <b>Выдача VIP</b>\n\n"
+        "Отправь команду:\n"
+        "<code>/vip @username ДНИ</code>\n\n"
+        "📝 Пример:\n"
+        "<code>/vip @milaCHka 30</code>\n"
+        "→ выдаст 30 дней VIP",
+        parse_mode="HTML"
+    )
+
+@router.message(Command("vip"))
+async def cmd_give_vip(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У тебя нет доступа!", parse_mode="HTML")
+        return
+    args = command.args.split() if command.args else []
+    if len(args) < 2:
+        await message.answer("❌ Формат: /vip @username ДНИ", parse_mode="HTML")
+        return
+    target_uname = args[0].replace("@", "")
+    try:
+        days = int(args[1])
+    except ValueError:
+        await message.answer("❌ Дни должны быть числом!", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        target = await conn.fetchrow("SELECT * FROM users WHERE username = $1", target_uname)
+        if not target:
+            await message.answer("❌ Пользователь не найден!", parse_mode="HTML")
+            return
+        until = (datetime.date.today() + datetime.timedelta(days=days)).isoformat()
+        await conn.execute("UPDATE users SET is_vip = 1, vip_until = $1 WHERE user_id = $2", until, target['user_id'])
+    await message.answer(f"✅ @{target_uname} получил VIP на {days} дней!", parse_mode="HTML")
 
 # ============================================================
 # 🚀 ЗАПУСК
