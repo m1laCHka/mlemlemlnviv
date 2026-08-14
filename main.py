@@ -55,6 +55,7 @@ db_pool: Optional[asyncpg.Pool] = None
 active_roulettes: Dict[int, dict] = {}
 active_duels: Dict[str, dict] = {}
 active_cats: Dict[str, dict] = {}
+marry_requests: Dict[int, dict] = {}  # Для брака
 
 # ---------------------------------------------------------
 # ВЕБ-СЕРВЕР ДЛЯ РЕНДЕРА
@@ -89,7 +90,7 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 # ---------------------------------------------------------
-# БАЗА ДАННЫХ (POSTGRESQL)
+# БАЗА ДАННЫХ (POSTGRESQL) — БЕЗ УДАЛЕНИЯ ТАБЛИЦ
 # ---------------------------------------------------------
 async def init_db():
     global db_pool
@@ -112,7 +113,8 @@ async def init_db():
             await conn.execute("SELECT 1")
             print("✅ Подключение работает!")
             
-            print("🔄 Создаю таблицы...")
+            print("🔄 СОЗДАЮ ТАБЛИЦЫ (если их нет)...")
+            
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
@@ -121,11 +123,11 @@ async def init_db():
                 custom_emoji TEXT DEFAULT '',
                 coins BIGINT DEFAULT 1000,
                 stars BIGINT DEFAULT 10,
-                is_vip INT DEFAULT 0,
+                is_vip BIGINT DEFAULT 0,
                 vip_until TEXT DEFAULT NULL,
                 vip_start_date TEXT DEFAULT NULL,
-                is_hidden INT DEFAULT 0,
-                insurance INT DEFAULT 0,
+                is_hidden BIGINT DEFAULT 0,
+                insurance BIGINT DEFAULT 0,
                 family_id BIGINT DEFAULT NULL,
                 spouse_id BIGINT DEFAULT NULL,
                 divorce_until TEXT DEFAULT NULL,
@@ -152,28 +154,29 @@ async def init_db():
                 quests_completed BIGINT DEFAULT 0
             );
             """)
-            print("✅ Таблицы созданы!")
+            print("✅ Таблица users создана!")
             
-            # Создаём остальные таблицы
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS families (
                 id SERIAL PRIMARY KEY,
                 user1_id BIGINT,
                 user2_id BIGINT,
-                score INT DEFAULT 0,
+                score BIGINT DEFAULT 0,
                 created_at TEXT,
-                top1_count INT DEFAULT 0,
-                last_anniversary_month INT DEFAULT 0
+                top1_count BIGINT DEFAULT 0,
+                last_anniversary_month BIGINT DEFAULT 0
             );
             """)
+            print("✅ Таблица families создана!")
             
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS children (
                 id SERIAL PRIMARY KEY,
-                family_id INT,
+                family_id BIGINT,
                 child_id BIGINT
             );
             """)
+            print("✅ Таблица children создана!")
             
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS achievements (
@@ -182,35 +185,39 @@ async def init_db():
                 PRIMARY KEY (user_id, ach_id)
             );
             """)
+            print("✅ Таблица achievements создана!")
             
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS user_quests (
                 user_id BIGINT,
-                quest_id INT,
-                progress INT DEFAULT 0,
-                completed INT DEFAULT 0,
+                quest_id BIGINT,
+                progress BIGINT DEFAULT 0,
+                completed BIGINT DEFAULT 0,
                 PRIMARY KEY (user_id, quest_id)
             );
             """)
+            print("✅ Таблица user_quests создана!")
             
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS tournament (
                 user_id BIGINT PRIMARY KEY,
-                wins INT DEFAULT 0,
-                fee_paid INT DEFAULT 0
+                wins BIGINT DEFAULT 0,
+                fee_paid BIGINT DEFAULT 0
             );
             """)
+            print("✅ Таблица tournament создана!")
             
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS promos (
                 code TEXT PRIMARY KEY,
-                stars INT DEFAULT 0,
+                stars BIGINT DEFAULT 0,
                 coins BIGINT DEFAULT 0,
-                vip_days INT DEFAULT 0,
-                max_uses INT DEFAULT 100,
-                uses INT DEFAULT 0
+                vip_days BIGINT DEFAULT 0,
+                max_uses BIGINT DEFAULT 100,
+                uses BIGINT DEFAULT 0
             );
             """)
+            print("✅ Таблица promos создана!")
             
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS user_promos (
@@ -219,7 +226,9 @@ async def init_db():
                 PRIMARY KEY (user_id, code)
             );
             """)
-            print("✅ Все таблицы созданы!")
+            print("✅ Таблица user_promos создана!")
+            
+            print("✅ ВСЕ ТАБЛИЦЫ СОЗДАНЫ!")
             
     except Exception as e:
         print(f"❌ КРИТИЧЕСКАЯ ОШИБКА В БАЗЕ ДАННЫХ: {e}")
@@ -1118,54 +1127,107 @@ async def process_join_tournament(callback: CallbackQuery):
     await callback.answer("✅ Ты в турнире!", show_alert=True)
 
 # ============================================================
-# 💍 СЕМЬЯ
+# 💍 СЕМЬЯ (БЕЗ КНОПОК)
 # ============================================================
 @router.message(F.text.lower().startswith("обручиться"))
 async def cmd_marry(message: Message):
     if not message.reply_to_message:
-        await message.answer("❌ Ответь на сообщение!", parse_mode="HTML")
+        await message.answer("❌ Ответь на сообщение того, с кем хочешь обручиться!", parse_mode="HTML")
         return
 
     u1 = await get_or_create_user(message.from_user.id, message.from_user.username)
     u2 = await get_or_create_user(message.reply_to_message.from_user.id, message.reply_to_message.from_user.username)
 
-    if u1['family_id'] or u2['family_id']:
-        await message.answer("❌ Кто-то уже в браке!", parse_mode="HTML")
+    # Проверка: не заняты ли
+    if u1['family_id']:
+        await message.answer("❌ Ты уже в браке!", parse_mode="HTML")
+        return
+    if u2['family_id']:
+        await message.answer("❌ Этот человек уже в браке!", parse_mode="HTML")
         return
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="❤️ Да", callback_data=f"marry_yes_{u1['user_id']}_{u2['user_id']}"),
-        InlineKeyboardButton(text="💔 Нет", callback_data="marry_no")
-    ]])
-    await message.answer(f"💍 {message.reply_to_message.from_user.first_name}, согласие?", reply_markup=kb)
-
-@router.callback_query(F.data.startswith("marry_yes_"))
-async def process_marry(callback: CallbackQuery):
-    if callback.data == "marry_no":
-        await callback.message.delete()
+    # Проверка: не сам с собой
+    if u1['user_id'] == u2['user_id']:
+        await message.answer("❌ Нельзя обручиться с самим собой!", parse_mode="HTML")
         return
 
-    parts = callback.data.split("_")
-    if len(parts) != 4:
-        await callback.answer("Ошибка!", show_alert=True)
-        return
-    
-    _, _, u1, u2 = parts
-    u1, u2 = int(u1), int(u2)
+    # Сохраняем запрос
+    marry_requests[u2['user_id']] = {
+        "from": u1['user_id'],
+        "from_name": u1['custom_nick'] or u1['username'] or message.from_user.first_name,
+        "chat_id": message.chat.id
+    }
 
-    if callback.from_user.id != u2:
-        await callback.answer("Не тебе!", show_alert=True)
-        return
-
-    today = datetime.date.today().isoformat()
-    async with db_pool.acquire() as conn:
-        fam_id = await conn.fetchval(
-            "INSERT INTO families (user1_id, user2_id, created_at) VALUES ($1, $2, $3) RETURNING id",
-            u1, u2, today
+    # Отправляем предложение в ЛС второму игроку
+    try:
+        await bot.send_message(
+            u2['user_id'],
+            f"💍 <b>{marry_requests[u2['user_id']]['from_name']}</b> хочет обручиться с тобой!\n\n"
+            f"Напиши <b>да</b> — чтобы согласиться\n"
+            f"Напиши <b>нет</b> — чтобы отказаться",
+            parse_mode="HTML"
         )
-        await conn.execute("UPDATE users SET family_id = $1, spouse_id = $2, stars = stars + 5 WHERE user_id IN ($3, $4)", fam_id, u2, u1, u2)
+        await message.answer(f"✅ Предложение отправлено <b>{u2['custom_nick'] or u2['username'] or 'пользователю'}</b> в ЛС!", parse_mode="HTML")
+    except Exception:
+        await message.answer("❌ Не могу отправить сообщение пользователю. Возможно, он не писал боту.", parse_mode="HTML")
+        if u2['user_id'] in marry_requests:
+            del marry_requests[u2['user_id']]
 
-    await callback.message.edit_text("🎉 <b>СЕМЬЯ СОЗДАНА! +5⭐ каждому!</b>", parse_mode="HTML")
+@router.message(F.text.lower().in_(["да", "нет"]))
+async def process_marry_answer(message: Message):
+    # Проверяем, есть ли запрос для этого пользователя
+    if message.from_user.id not in marry_requests:
+        return
+
+    request = marry_requests[message.from_user.id]
+    answer = message.text.lower()
+
+    if answer == "нет":
+        await message.answer("💔 Ты отказался от предложения!", parse_mode="HTML")
+        # Уведомляем того, кто предлагал
+        try:
+            await bot.send_message(
+                request["from"],
+                f"💔 {message.from_user.first_name} отказался от предложения обручиться.",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+        del marry_requests[message.from_user.id]
+        return
+
+    if answer == "да":
+        # Создаём семью
+        u1_id = request["from"]
+        u2_id = message.from_user.id
+        today = datetime.date.today().isoformat()
+
+        async with db_pool.acquire() as conn:
+            # Проверяем ещё раз, не заняты ли
+            u1 = await conn.fetchrow("SELECT family_id FROM users WHERE user_id = $1", u1_id)
+            u2 = await conn.fetchrow("SELECT family_id FROM users WHERE user_id = $1", u2_id)
+            if u1['family_id'] or u2['family_id']:
+                await message.answer("❌ Кто-то уже в браке! Возможно, пока ты думал, кто-то другой сделал предложение.", parse_mode="HTML")
+                del marry_requests[message.from_user.id]
+                return
+
+            fam_id = await conn.fetchval(
+                "INSERT INTO families (user1_id, user2_id, created_at) VALUES ($1, $2, $3) RETURNING id",
+                u1_id, u2_id, today
+            )
+            await conn.execute("UPDATE users SET family_id = $1, spouse_id = $2, stars = stars + 5 WHERE user_id IN ($3, $4)",
+                             fam_id, u2_id, u1_id, u2_id)
+
+        await message.answer("🎉 <b>ПОЗДРАВЛЯЮ! СЕМЬЯ СОЗДАНА! +5⭐ каждому!</b>", parse_mode="HTML")
+        try:
+            await bot.send_message(
+                u1_id,
+                f"🎉 <b>{message.from_user.first_name}</b> согласился на брак! Семья создана! +5⭐ каждому!",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+        del marry_requests[message.from_user.id]
 
 @router.message(F.text.lower() == "развод")
 async def cmd_divorce(message: Message):
