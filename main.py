@@ -36,10 +36,10 @@ db_pool: Optional[asyncpg.Pool] = None
 # Глобальные игровые состояния (в ОЗУ)
 active_roulettes: Dict[int, dict] = {}
 active_duels: Dict[str, dict] = {}
-active_cats: Dict[int, dict] = {}
+active_cats: Dict[str, dict] = {}
 
 # ---------------------------------------------------------
-# ВЕБ-СЕРВЕР ДЛЯ РЕНДЕРА И UPTIMEROBOT
+# ВЕБ-СЕРВЕР ДЛЯ РЕНДЕРА
 # ---------------------------------------------------------
 async def handle_ping(request):
     return web.Response(text="Bot is running 24/7!")
@@ -57,7 +57,6 @@ async def start_web_server():
 # ---------------------------------------------------------
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     kb = [
-        [KeyboardButton(text="🎰 Рулетка"), KeyboardButton(text="🤠 Дуэль"), KeyboardButton(text="🐱 Котики")],
         [KeyboardButton(text="🎰 Казино"), KeyboardButton(text="🎁 Приз"), KeyboardButton(text="🏪 Магазин")],
         [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="📊 Статистика"), KeyboardButton(text="⭐ Перевод")],
         [KeyboardButton(text="🏆 Топ"), KeyboardButton(text="💍 Семья"), KeyboardButton(text="🎯 Квесты")],
@@ -268,7 +267,7 @@ HELP_TEXT = """🎮 <b>ПОЛНЫЙ СПИСОК ВОЗМОЖНОСТЕЙ БОТ
 🎲 <b>ИГРЫ</b>
 🎰 Рулетка — р / рулетка (красное, черное, чет, нечет, число)
 🤠 Дуэль — дуэль (сумма) — пошагово
-🐱 Котики — котики (ставка) — посчитай жёлтых 🐈
+🐱 Котики — котики (сумма) — вызови соперника! Кто первый угадает — забирает банк
 🎰 Казино — казино — за 25⭐
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -279,7 +278,7 @@ HELP_TEXT = """🎮 <b>ПОЛНЫЙ СПИСОК ВОЗМОЖНОСТЕЙ БОТ
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 👤 <b>ПРОФИЛЬ И ТОПЫ</b>
-👤 Профиль — профиль / п
+👤 Профиль — профиль / профиль @username
 📊 Статистика — статистика / стата
 🏆 Топы — топ, топ_семей
 
@@ -309,12 +308,12 @@ async def cmd_help(message: Message):
 # ============================================================
 # 🎰 РУЛЕТКА
 # ============================================================
-@router.message(F.text.lower().startswith(("рулетка", "р", "🎰 рулетка")))
+@router.message(F.text.lower().startswith(("рулетка", "р")))
 async def cmd_roulette(message: Message):
     chat_id = message.chat.id
     args = message.text.split()
 
-    if len(args) < 3:
+    if len(args) < 2:
         await message.answer(
             "🎰 Ставка:\nр красное 100\nр 15 100\nр 0 100\nМин. 50💰, таймер 60 сек, макс 10 ставок/чат",
             parse_mode="HTML"
@@ -322,19 +321,29 @@ async def cmd_roulette(message: Message):
         return
 
     bet_type = args[1].lower()
+    
+    if len(args) < 3:
+        await message.answer("❌ Укажи сумму ставки!", parse_mode="HTML")
+        return
+        
     try:
         bet_amount = int(args[2])
     except ValueError:
-        await message.answer("❌ Ставка должна быть числом!")
+        await message.answer("❌ Ставка должна быть числом!", parse_mode="HTML")
         return
 
     if bet_amount < 50:
-        await message.answer("❌ Мин. ставка: 50 монет!")
+        await message.answer("❌ Мин. ставка: 50 монет!", parse_mode="HTML")
+        return
+
+    valid_types = ["красное", "red", "черное", "black", "чет", "even", "нечет", "odd"]
+    if bet_type not in valid_types and not bet_type.isdigit():
+        await message.answer("❌ Ставь: красное, черное, чет, нечет или число (0-30)", parse_mode="HTML")
         return
 
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     if user['coins'] < bet_amount:
-        await message.answer("❌ Недостаточно монет!")
+        await message.answer("❌ Недостаточно монет!", parse_mode="HTML")
         return
 
     async with db_pool.acquire() as conn:
@@ -345,7 +354,7 @@ async def cmd_roulette(message: Message):
 
     roul = active_roulettes[chat_id]
     if len(roul["bets"]) >= 10:
-        await message.answer("❌ Лимит 10 ставок!")
+        await message.answer("❌ Лимит 10 ставок!", parse_mode="HTML")
         return
 
     uname = user['custom_nick'] or user['username'] or f"Игрок_{user['user_id']}"
@@ -414,6 +423,11 @@ async def cmd_duel(message: Message):
     try:
         amount = int(args[1])
     except ValueError:
+        await message.answer("❌ Ставка должна быть числом!", parse_mode="HTML")
+        return
+
+    if amount < 1:
+        await message.answer("❌ Ставка должна быть больше 0!", parse_mode="HTML")
         return
 
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
@@ -454,18 +468,23 @@ async def process_accept_duel(callback: CallbackQuery):
         await callback.answer("Недостаточно монет!", show_alert=True)
         return
 
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", duel["amount"], p1_id)
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", duel["amount"], p2_id)
+
     p2_name = p2_user['custom_nick'] or p2_user['username'] or callback.from_user.first_name
     duel["p2"] = p2_id
     duel["p2_name"] = p2_name
     duel["turn"] = p1_id
     duel["p1_hp"] = 100
     duel["p2_hp"] = 100
+    duel["pot"] = duel["amount"] * 2
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="💥 ВЫСТРЕЛ!", callback_data=f"shoot_{duel_id}")
     ]])
     await callback.message.edit_text(
-        f"🤠 ДУЭЛЬ!\n{duel['p1_name']} vs {p2_name}\n\n👉 Ход: {duel['p1_name']}",
+        f"🤠 ДУЭЛЬ!\n{duel['p1_name']} vs {p2_name}\n💰 Банк: {duel['pot']}💰\n\n👉 Ход: {duel['p1_name']}",
         reply_markup=kb, parse_mode="HTML"
     )
 
@@ -495,12 +514,14 @@ async def process_shoot(callback: CallbackQuery):
 
     if target_hp <= 0:
         winner_id, loser_id = shooter_id, target_id
-        tot_pot = duel["amount"] * 2
-        win_amt = int(tot_pot * 0.9)
-
+        
         async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE users SET coins = coins - $1, losses = losses + 1, duel_games = duel_games + 1 WHERE user_id = $2", duel["amount"], loser_id)
-            await conn.execute("UPDATE users SET coins = coins + $1, wins = wins + 1, duel_games = duel_games + 1, duel_wins = duel_wins + 1 WHERE user_id = $2", win_amt - duel["amount"], winner_id)
+            winner = await conn.fetchrow("SELECT is_vip FROM users WHERE user_id = $1", winner_id)
+            commission = 0 if winner['is_vip'] == 1 else 0.1
+            win_amt = int(duel["pot"] * (1 - commission))
+            
+            await conn.execute("UPDATE users SET coins = coins + $1, wins = wins + 1, duel_games = duel_games + 1, duel_wins = duel_wins + 1 WHERE user_id = $2", win_amt, winner_id)
+            await conn.execute("UPDATE users SET losses = losses + 1, duel_games = duel_games + 1 WHERE user_id = $1", loser_id)
 
         del active_duels[duel_id]
         await callback.message.edit_text(f"💀 {shooter_name} убивает {target_name}!\n🏆 {shooter_name} +{win_amt}💰", parse_mode="HTML")
@@ -512,56 +533,124 @@ async def process_shoot(callback: CallbackQuery):
         await callback.message.edit_text(
             f"🔫 {shooter_name} наносит {damage} урона!\n"
             f"{duel['p1_name']}: {duel['p1_hp']} HP\n"
-            f"{duel['p2_name']}: {duel['p2_hp']} HP\n\n👉 Ход: {target_name}",
+            f"{duel['p2_name']}: {duel['p2_hp']} HP\n💰 Банк: {duel['pot']}💰\n\n👉 Ход: {target_name}",
             reply_markup=kb, parse_mode="HTML"
         )
 
 # ============================================================
-# 🐱 КОТИКИ
+# 🐱 КОТИКИ (как дуэль)
 # ============================================================
 @router.message(F.text.lower().startswith(("котики", "🐱 котики")))
 async def cmd_cats(message: Message):
-    chat_id = message.chat.id
     args = message.text.split()
-    bet = int(args[1]) if len(args) > 1 and args[1].isdigit() else 100
+    if len(args) < 2:
+        await message.answer("🐱 Формат: котики 100", parse_mode="HTML")
+        return
+    try:
+        bet = int(args[1])
+    except ValueError:
+        await message.answer("❌ Ставка должна быть числом!", parse_mode="HTML")
+        return
+
+    if bet < 1:
+        await message.answer("❌ Ставка должна быть больше 0!", parse_mode="HTML")
+        return
 
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     if user['coins'] < bet:
         await message.answer("❌ Недостаточно монет!", parse_mode="HTML")
         return
 
+    cat_id = f"{message.chat.id}_{message.from_user.id}_{random.randint(100,999)}"
+
+    active_cats[cat_id] = {
+        "p1": user['user_id'],
+        "p1_name": user['custom_nick'] or user['username'] or message.from_user.first_name,
+        "p2": None,
+        "p2_name": None,
+        "bet": bet,
+        "chat_id": message.chat.id,
+        "active": False,
+        "winner": None
+    }
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=f"🐱 Принять вызов ({bet}💰)", callback_data=f"accept_cats_{cat_id}")
+    ]])
+    await message.answer(f"🐱 {active_cats[cat_id]['p1_name']} вызывает на котиков! Ставка: {bet}💰\nКто первый угадает — забирает банк!", reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("accept_cats_"))
+async def process_accept_cats(callback: CallbackQuery):
+    cat_id = callback.data.replace("accept_cats_", "")
+    if cat_id not in active_cats: return
+
+    game = active_cats[cat_id]
+    p1_id, p2_id = game["p1"], callback.from_user.id
+    if p1_id == p2_id:
+        await callback.answer("Нельзя с собой!", show_alert=True)
+        return
+
+    p2_user = await get_or_create_user(p2_id, callback.from_user.username)
+    if p2_user['coins'] < game["bet"]:
+        await callback.answer("Недостаточно монет!", show_alert=True)
+        return
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", game["bet"], p1_id)
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", game["bet"], p2_id)
+
+    game["p2"] = p2_id
+    game["p2_name"] = p2_user['custom_nick'] or p2_user['username'] or callback.from_user.first_name
+    game["active"] = True
+    game["pot"] = game["bet"] * 2
+    game["attempts"] = {}
+    game["winner"] = None
+
     yellow_cats = random.randint(1, 40)
     black_cats = random.randint(0, 15)
     cats_list = ["🐈"] * yellow_cats + ["🐈‍⬛"] * black_cats
     random.shuffle(cats_list)
+    game["yellow_count"] = yellow_cats
+    game["cats_text"] = "".join(cats_list)
 
-    async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", bet, user['user_id'])
-
-    active_cats[chat_id] = {"count": yellow_cats, "pot": bet, "attempts": {}, "active": True}
-
-    text = f"🐱 Считай жёлтых 🐈 (чёрные 🐈‍⬛ не считаем!)\nСтавка: {bet}💰\n\n" + "".join(cats_list)
-    await message.answer(text, parse_mode="HTML")
+    text = f"🐱 Считай жёлтых 🐈 (чёрные 🐈‍⬛ не считаем!)\n💰 Банк: {game['pot']}💰\n\n{game['cats_text']}\n\n✏️ Пиши число в чат!"
+    
+    await callback.message.edit_text(text, parse_mode="HTML")
 
 @router.message(F.text.isdigit())
 async def process_cats_answer(message: Message):
-    chat_id = message.chat.id
-    if chat_id not in active_cats or not active_cats[chat_id]["active"]: return
+    for cat_id, game in list(active_cats.items()):
+        if not game["active"]: continue
+        if game["winner"]: continue
+        
+        user_id = message.from_user.id
+        if user_id not in [game["p1"], game["p2"]]: continue
+        
+        if game["attempts"].get(user_id, 0) >= 3: 
+            await message.answer("⏳ У тебя уже 3 попытки!", parse_mode="HTML")
+            return
 
-    game = active_cats[chat_id]
-    user_id = message.from_user.id
-    if game["attempts"].get(user_id, 0) >= 3: return
+        game["attempts"][user_id] = game["attempts"].get(user_id, 0) + 1
+        val = int(message.text)
 
-    game["attempts"][user_id] = game["attempts"].get(user_id, 0) + 1
-    val = int(message.text)
-
-    if val == game["count"]:
-        game["active"] = False
-        win_pot = int(game["pot"] * 1.8)
-        async with db_pool.acquire() as conn:
-            await conn.execute("""UPDATE users SET coins = coins + $1, wins = wins + 1, total_games = total_games + 1,
-                cat_games = cat_games + 1, cat_wins = cat_wins + 1 WHERE user_id = $2""", win_pot, user_id)
-        await message.answer(f"🎉 Правильно! Жёлтых котиков было {val}.\n+{win_pot}💰", parse_mode="HTML")
+        if val == game["yellow_count"]:
+            game["active"] = False
+            game["winner"] = user_id
+            
+            async with db_pool.acquire() as conn:
+                winner = await conn.fetchrow("SELECT is_vip FROM users WHERE user_id = $1", user_id)
+                commission = 0 if winner['is_vip'] == 1 else 0.1
+                win_pot = int(game["pot"] * (1 - commission))
+                
+                await conn.execute("""UPDATE users SET coins = coins + $1, wins = wins + 1, total_games = total_games + 1,
+                    cat_games = cat_games + 1, cat_wins = cat_wins + 1 WHERE user_id = $2""", win_pot, user_id)
+                loser_id = game["p2"] if user_id == game["p1"] else game["p1"]
+                await conn.execute("UPDATE users SET losses = losses + 1, cat_games = cat_games + 1 WHERE user_id = $1", loser_id)
+            
+            uname = game["p1_name"] if user_id == game["p1"] else game["p2_name"]
+            await message.answer(f"🎉 {uname} угадал! Жёлтых котиков было {val}.\n+{win_pot}💰", parse_mode="HTML")
+            del active_cats[cat_id]
+            return
 
 # ============================================================
 # 🎰 КАЗИНО
@@ -659,6 +748,10 @@ async def cmd_transfer(message: Message):
         amount = int(args[2])
     except ValueError:
         await message.answer("❌ Сумма должна быть числом!", parse_mode="HTML")
+        return
+
+    if amount < 1:
+        await message.answer("❌ Сумма должна быть больше 0!", parse_mode="HTML")
         return
 
     sender = await get_or_create_user(message.from_user.id, message.from_user.username)
@@ -774,11 +867,23 @@ async def cmd_unhide_profile(message: Message):
     await message.answer("🔓 Профиль открыт!", parse_mode="HTML")
 
 # ============================================================
-# 👤 ПРОФИЛЬ
+# 👤 ПРОФИЛЬ (свой + чужой)
 # ============================================================
 @router.message(F.text.lower().startswith(("профиль", "п")))
 async def cmd_profile(message: Message):
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    args = message.text.split()
+    
+    if len(args) > 1:
+        target_uname = args[1].replace("@", "")
+        async with db_pool.acquire() as conn:
+            target_row = await conn.fetchrow("SELECT * FROM users WHERE username = $1", target_uname)
+            if not target_row:
+                await message.answer("❌ Пользователь не найден!", parse_mode="HTML")
+                return
+            user = dict(target_row)
+    else:
+        user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    
     rank = calculate_rank(user['wins'], user['total_games'])
     display_name = user['custom_nick'] or user['username'] or f"Игрок_{user['user_id']}"
 
