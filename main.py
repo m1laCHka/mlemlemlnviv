@@ -702,8 +702,8 @@ async def cmd_casino(message: Message):
 
 async def main():
     await init_db()
-    # Запускаем веб-сервер ПЕРВЫМ
-    await start_web_server()
+    # Запускаем веб-сервер в фоне
+    asyncio.create_task(start_web_server())
     print("🤖 БОТ ЗАПУЩЕН! ВСЁ РАБОТАЕТ!")
     await dp.start_polling(bot)
 
