@@ -1335,8 +1335,9 @@ async def process_divorce(callback: CallbackQuery):
 # ---------------------------------------------------------
 # УСЫНОВЛЕНИЕ
 # ---------------------------------------------------------
-@router(message, F.text.lower().startswith("ребёнок"))
-async def cmd_adopt(message: Message):
+@router.message(F.text.lower().startswith("ребёнок"))
+async def child_handler(message: Message):
+    ...
     if not message.reply_to_message:
         await message.answer("❌ Ответьте на сообщение игрока!", parse_mode="HTML")
         return
