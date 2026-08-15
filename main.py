@@ -58,15 +58,15 @@ async def start_web_server():
     logging.info(f"🌐 Веб-сервер запущен на порту {PORT}")
 
 # ---------------------------------------------------------
-# ГЛАВНАЯ КЛАВИАТУРА
+# ГЛАВНАЯ КЛАВИАТУРА (БЕЗ ЭМОДЗИ)
 # ---------------------------------------------------------
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     kb = [
-        [KeyboardButton(text="🎰 Рулетка"), KeyboardButton(text="🤠 Дуэль"), KeyboardButton(text="🐱 Котики")],
-        [KeyboardButton(text="🎰 Казино"), KeyboardButton(text="🎁 Приз"), KeyboardButton(text="🏪 Магазин")],
-        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="📊 Статистика"), KeyboardButton(text="⭐ Перевод")],
-        [KeyboardButton(text="🏆 Топ"), KeyboardButton(text="💍 Семья"), KeyboardButton(text="🎯 Квесты")],
-        [KeyboardButton(text="🏆 Турнир"), KeyboardButton(text="❓ Помощь")]
+        [KeyboardButton(text="Рулетка"), KeyboardButton(text="Дуэль"), KeyboardButton(text="Котики")],
+        [KeyboardButton(text="Казино"), KeyboardButton(text="Приз"), KeyboardButton(text="Магазин")],
+        [KeyboardButton(text="Профиль"), KeyboardButton(text="Статистика"), KeyboardButton(text="Перевод")],
+        [KeyboardButton(text="Топ"), KeyboardButton(text="Семья"), KeyboardButton(text="Квесты")],
+        [KeyboardButton(text="Турнир"), KeyboardButton(text="Помощь")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
@@ -446,156 +446,126 @@ async def cmd_start(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=get_main_keyboard())
 
-@router.message(F.text.lower().in_(["помощь", "help", "❓ помощь"]))
+@router.message(Command("help"))
 async def cmd_help(message: Message):
     await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 # ============================================================
-# 📌 ДИАГНОСТИКА (ЛОВИТ ВСЕ СООБЩЕНИЯ)
+# 📱 ОБРАБОТКА КНОПОК ГЛАВНОГО МЕНЮ (БЕЗ ЭМОДЗИ)
 # ============================================================
-@router.message()
-async def catch_all(message: Message):
-    """Ловит все сообщения, которые не обработаны другими хендлерами"""
-    logging.info(f"📩 Получено сообщение: {message.text} от {message.from_user.id}")
-    
-    # Проверяем, не является ли сообщение командой с кнопки
-    text = message.text.lower()
-    
-    # Список известных команд
-    known_commands = [
-        "рулетка", "дуэль", "котики", "казино", "приз", "магазин",
-        "профиль", "статистика", "перевод", "топ", "семья", "квесты",
-        "турнир", "помощь", "start", "help"
-    ]
-    
-    # Если сообщение содержит что-то из списка - игнорируем
-    for cmd in known_commands:
-        if cmd in text:
-            return
-    
-    await message.answer(
-        "❓ Я не понял вашу команду.\n\n"
-        "Введите /help для списка команд или /start для главного меню.",
-        parse_mode="HTML",
-        reply_markup=get_main_keyboard()
-    )
-
-# ============================================================
-# 📱 ОБРАБОТКА КНОПОК ГЛАВНОГО МЕНЮ
-# ============================================================
-@router.message(F.text.contains("Рулетка") | F.text.contains("🎰"))
+@router.message(F.text == "Рулетка")
 async def btn_roulette(m: Message): 
     await cmd_roulette(m)
 
-@router.message(F.text.contains("Дуэль") | F.text.contains("🤠"))
+@router.message(F.text == "Дуэль")
 async def btn_duel(m: Message): 
     await m.answer("🤠 Напишите в группе: <code>дуэль 100</code>", parse_mode="HTML")
 
-@router.message(F.text.contains("Котики") | F.text.contains("🐱"))
+@router.message(F.text == "Котики")
 async def btn_cats(m: Message): 
     await cmd_cats(m)
 
-@router.message(F.text.contains("Казино") | F.text.contains("🎰"))
+@router.message(F.text == "Казино")
 async def btn_casino(m: Message): 
     await cmd_casino(m)
 
-@router.message(F.text.contains("Приз") | F.text.contains("🎁"))
+@router.message(F.text == "Приз")
 async def btn_prize(m: Message): 
     await cmd_prize(m)
 
-@router.message(F.text.contains("Магазин") | F.text.contains("🏪"))
+@router.message(F.text == "Магазин")
 async def btn_shop(m: Message): 
     await cmd_shop(m)
 
-@router.message(F.text.contains("Профиль") | F.text.contains("👤"))
+@router.message(F.text == "Профиль")
 async def btn_profile(m: Message): 
     await cmd_profile(m)
 
-@router.message(F.text.contains("Статистика") | F.text.contains("📊"))
+@router.message(F.text == "Статистика")
 async def btn_stats(m: Message): 
     await cmd_stats(m)
 
-@router.message(F.text.contains("Перевод") | F.text.contains("⭐"))
+@router.message(F.text == "Перевод")
 async def btn_transfer(m: Message): 
     await m.answer("❌ Формат: <code>перевод @username 10</code>", parse_mode="HTML")
 
-@router.message(F.text.contains("Топ") | F.text.contains("🏆"))
+@router.message(F.text == "Топ")
 async def btn_top(m: Message): 
     await cmd_top(m)
 
-@router.message(F.text.contains("Семья") | F.text.contains("💍"))
+@router.message(F.text == "Семья")
 async def btn_fam(m: Message): 
     await cmd_family(m)
 
-@router.message(F.text.contains("Квесты") | F.text.contains("🎯"))
+@router.message(F.text == "Квесты")
 async def btn_q(m: Message): 
     await cmd_quests(m)
 
-@router.message(F.text.contains("Турнир") | F.text.contains("🏆"))
+@router.message(F.text == "Турнир")
 async def btn_t(m: Message): 
     await cmd_tournament(m)
 
-@router.message(F.text.contains("Помощь") | F.text.contains("❓"))
+@router.message(F.text == "Помощь")
 async def btn_help(m: Message): 
     await cmd_help(m)
 
 # ============================================================
-# 📱 ДОПОЛНИТЕЛЬНЫЕ ОБРАБОТЧИКИ (ПРЯМОЕ СОВПАДЕНИЕ)
+# 📱 ДОПОЛНИТЕЛЬНЫЕ ОБРАБОТЧИКИ (С ЭМОДЗИ - ДЛЯ СТАРЫХ КНОПОК)
 # ============================================================
-@router.message(F.text == "🎰 Рулетка")
-async def btn_roulette_direct(m: Message): 
+@router.message(F.text.contains("Рулетка") | F.text.contains("🎰"))
+async def btn_roulette_emoji(m: Message): 
     await cmd_roulette(m)
 
-@router.message(F.text == "🤠 Дуэль")
-async def btn_duel_direct(m: Message): 
+@router.message(F.text.contains("Дуэль") | F.text.contains("🤠"))
+async def btn_duel_emoji(m: Message): 
     await m.answer("🤠 Напишите в группе: <code>дуэль 100</code>", parse_mode="HTML")
 
-@router.message(F.text == "🐱 Котики")
-async def btn_cats_direct(m: Message): 
+@router.message(F.text.contains("Котики") | F.text.contains("🐱"))
+async def btn_cats_emoji(m: Message): 
     await cmd_cats(m)
 
-@router.message(F.text == "🎰 Казино")
-async def btn_casino_direct(m: Message): 
+@router.message(F.text.contains("Казино") | F.text.contains("🎰"))
+async def btn_casino_emoji(m: Message): 
     await cmd_casino(m)
 
-@router.message(F.text == "🎁 Приз")
-async def btn_prize_direct(m: Message): 
+@router.message(F.text.contains("Приз") | F.text.contains("🎁"))
+async def btn_prize_emoji(m: Message): 
     await cmd_prize(m)
 
-@router.message(F.text == "🏪 Магазин")
-async def btn_shop_direct(m: Message): 
+@router.message(F.text.contains("Магазин") | F.text.contains("🏪"))
+async def btn_shop_emoji(m: Message): 
     await cmd_shop(m)
 
-@router.message(F.text == "👤 Профиль")
-async def btn_profile_direct(m: Message): 
+@router.message(F.text.contains("Профиль") | F.text.contains("👤"))
+async def btn_profile_emoji(m: Message): 
     await cmd_profile(m)
 
-@router.message(F.text == "📊 Статистика")
-async def btn_stats_direct(m: Message): 
+@router.message(F.text.contains("Статистика") | F.text.contains("📊"))
+async def btn_stats_emoji(m: Message): 
     await cmd_stats(m)
 
-@router.message(F.text == "⭐ Перевод")
-async def btn_transfer_direct(m: Message): 
+@router.message(F.text.contains("Перевод") | F.text.contains("⭐"))
+async def btn_transfer_emoji(m: Message): 
     await m.answer("❌ Формат: <code>перевод @username 10</code>", parse_mode="HTML")
 
-@router.message(F.text == "🏆 Топ")
-async def btn_top_direct(m: Message): 
+@router.message(F.text.contains("Топ") | F.text.contains("🏆"))
+async def btn_top_emoji(m: Message): 
     await cmd_top(m)
 
-@router.message(F.text == "💍 Семья")
-async def btn_fam_direct(m: Message): 
+@router.message(F.text.contains("Семья") | F.text.contains("💍"))
+async def btn_fam_emoji(m: Message): 
     await cmd_family(m)
 
-@router.message(F.text == "🎯 Квесты")
-async def btn_q_direct(m: Message): 
+@router.message(F.text.contains("Квесты") | F.text.contains("🎯"))
+async def btn_q_emoji(m: Message): 
     await cmd_quests(m)
 
-@router.message(F.text == "🏆 Турнир")
-async def btn_t_direct(m: Message): 
+@router.message(F.text.contains("Турнир") | F.text.contains("🏆"))
+async def btn_t_emoji(m: Message): 
     await cmd_tournament(m)
 
-@router.message(F.text == "❓ Помощь")
-async def btn_help_direct(m: Message): 
+@router.message(F.text.contains("Помощь") | F.text.contains("❓"))
+async def btn_help_emoji(m: Message): 
     await cmd_help(m)
 
 # ---------------------------------------------------------
@@ -2398,6 +2368,39 @@ async def cancel_mailing(message: Message):
         await message.answer("❌ Рассылка отменена!", parse_mode="HTML")
     else:
         await message.answer("❌ Активная рассылка не найдена!", parse_mode="HTML")
+
+# ============================================================
+# 📌 ДИАГНОСТИКА (ЛОВИТ ВСЕ СООБЩЕНИЯ) - В КОНЦЕ!
+# ============================================================
+@router.message()
+async def catch_all(message: Message):
+    """Ловит все сообщения, которые не обработаны другими хендлерами"""
+    logging.info(f"📩 Получено сообщение: {message.text} от {message.from_user.id}")
+    
+    # Игнорируем команды
+    if message.text and message.text.startswith('/'):
+        return
+    
+    # Игнорируем сообщения, которые уже обработаны
+    text = message.text.lower() if message.text else ""
+    
+    # Список известных команд (все варианты)
+    known_commands = [
+        "рулетка", "дуэль", "котики", "казино", "приз", "магазин",
+        "профиль", "статистика", "перевод", "топ", "семья", "квесты",
+        "турнир", "помощь", "start", "help"
+    ]
+    
+    for cmd in known_commands:
+        if cmd in text:
+            return
+    
+    await message.answer(
+        "❓ Я не понял вашу команду.\n\n"
+        "Введите /help для списка команд или /start для главного меню.",
+        parse_mode="HTML",
+        reply_markup=get_main_keyboard()
+    )
 
 # ---------------------------------------------------------
 # 🚀 ЗАПУСК БОТА
