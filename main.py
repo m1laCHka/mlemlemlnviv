@@ -182,7 +182,7 @@ async def init_db():
         );
         """)
 
-        # ✅ ПРОВЕРЯЕМ И ДОБАВЛЯЕМ НЕДОСТАЮЩИЕ КОЛОНКИ
+        # ✅ ПРОВЕРЯЕМ И ДОБАВЛЯЕМ НЕДОСТАЮЩИЕ КОЛОНКИ В users
         existing_columns = await conn.fetch("""
             SELECT column_name 
             FROM information_schema.columns 
@@ -246,7 +246,48 @@ async def init_db():
                 except Exception as e:
                     logging.warning(f"⚠️ Не удалось добавить колонку {col}: {e}")
 
-        # Конвертация типов BOOLEAN
+        # ✅ ПРОВЕРЯЕМ И ДОБАВЛЯЕМ НЕДОСТАЮЩИЕ КОЛОНКИ В families
+        existing_family_columns = await conn.fetch("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'families'
+        """)
+        family_cols = {row['column_name'] for row in existing_family_columns}
+
+        required_family_columns = {
+            'id', 'user1_id', 'user2_id', 'name', 'score', 'created_at', 
+            'top1_count', 'last_anniversary_month'
+        }
+
+        for col in required_family_columns:
+            if col not in family_cols:
+                try:
+                    if col in ['id']:
+                        continue
+                    elif col in ['user1_id', 'user2_id']:
+                        col_type = 'BIGINT'
+                        default = '0'
+                    elif col in ['name']:
+                        col_type = 'VARCHAR(255)'
+                        default = "''"
+                    elif col in ['score', 'top1_count', 'last_anniversary_month']:
+                        col_type = 'INT'
+                        default = '0'
+                    elif col in ['created_at']:
+                        col_type = 'DATE'
+                        default = 'NULL'
+                    else:
+                        col_type = 'VARCHAR(255)'
+                        default = "''"
+
+                    await conn.execute(f"""
+                        ALTER TABLE families ADD COLUMN IF NOT EXISTS {col} {col_type} DEFAULT {default}
+                    """)
+                    logging.info(f"✅ Добавлена колонка: {col} в families ({col_type})")
+                except Exception as e:
+                    logging.warning(f"⚠️ Не удалось добавить колонку {col} в families: {e}")
+
+        # Конвертация типов BOOLEAN в users
         boolean_fields = [
             'is_hidden', 'is_vip', 'insurance',
             'quest1_done', 'quest2_done', 'quest3_done',
@@ -639,7 +680,7 @@ async def cmd_start(message: Message):
         await message.answer("👋 <b>Добро пожаловать!</b> Для начала выберите ваш пол:", parse_mode="HTML", reply_markup=kb)
         return
 
-    reply_markup = get_main_keyboard() if message.chat.type == ChatType.PRIVATE else None
+    reply_markup = get_main_keyboard()
     await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=reply_markup)
 
 @router.callback_query(F.data.startswith("gender_"))
@@ -657,13 +698,13 @@ async def process_gender(callback: CallbackQuery):
         parse_mode="HTML"
     )
     
-    reply_markup = get_main_keyboard() if callback.message.chat.type == ChatType.PRIVATE else None
+    reply_markup = get_main_keyboard()
     await callback.message.delete()
     await callback.message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=reply_markup)
 
 @router.message(F.text.lower().in_(["помощь", "help", "❓ помощь"]))
 async def cmd_help(message: Message):
-    reply_markup = get_main_keyboard() if message.chat.type == ChatType.PRIVATE else None
+    reply_markup = get_main_keyboard()
     await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=reply_markup)
 
 # ============================================================
@@ -1394,11 +1435,15 @@ async def cmd_profile(message: Message):
     family_info = ""
     if user['family_id']:
         async with db_pool.acquire() as conn:
-            fam = await conn.fetchrow("SELECT name, score FROM families WHERE id = $1", user['family_id'])
-            if fam:
-                fname = fam['name'] if fam['name'] else f"Семья #{user['family_id']}"
-                fscore = fam['score']
-                family_info = f"\n💍 <b>Семья:</b> {fname} (Очки: {fscore})"
+            try:
+                fam = await conn.fetchrow("SELECT name, score FROM families WHERE id = $1", user['family_id'])
+                if fam:
+                    fname = fam['name'] if fam['name'] else f"Семья #{user['family_id']}"
+                    fscore = fam['score']
+                    family_info = f"\n💍 <b>Семья:</b> {fname} (Очки: {fscore})"
+            except Exception as e:
+                logging.warning(f"Ошибка получения информации о семье: {e}")
+                family_info = f"\n💍 <b>Семья:</b> Семья #{user['family_id']}"
 
     games_data = [
         ("🎰 Рулетка", user['roulette_wins'], user['roulette_games']),
@@ -1755,7 +1800,15 @@ async def cmd_family(message: Message):
         return
 
     async with db_pool.acquire() as conn:
-        fam = await conn.fetchrow("SELECT * FROM families WHERE id = $1", user['family_id'])
+        try:
+            fam = await conn.fetchrow("SELECT * FROM families WHERE id = $1", user['family_id'])
+            if not fam:
+                await message.answer("❌ Семья не найдена!", parse_mode="HTML")
+                return
+        except Exception as e:
+            await message.answer("❌ Ошибка получения информации о семье!", parse_mode="HTML")
+            return
+            
         children = await conn.fetch("SELECT child_id FROM children WHERE family_id = $1", user['family_id'])
 
     fam_name = fam['name'] or f"Семья #{fam['id']}"
