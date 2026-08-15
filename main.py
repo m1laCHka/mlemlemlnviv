@@ -40,12 +40,7 @@ active_duels: Dict[str, dict] = {}
 active_cats: Dict[int, dict] = {}
 pending_marriages: Dict[str, dict] = {}
 pending_renames: Dict[str, dict] = {}
-
-# Аватарки для профиля
-AVATARS = {
-    "👨": "https://i.ibb.co/TMDrGsZ9/5472030760698059296-120.jpg",
-    "👩": "https://i.ibb.co/KzFmdF60/5472030760698059295-121.jpg"
-}
+admin_mailing_state: Dict[int, bool] = {}
 
 # ---------------------------------------------------------
 # ВЕБ-СЕРВЕР ДЛЯ RENDER
@@ -90,7 +85,6 @@ async def init_db():
             username VARCHAR(255),
             custom_nick VARCHAR(255) DEFAULT NULL,
             custom_emoji VARCHAR(50) DEFAULT '',
-            gender VARCHAR(10) DEFAULT NULL,
             coins BIGINT DEFAULT 1000,
             stars INT DEFAULT 10,
             is_vip BOOLEAN DEFAULT FALSE,
@@ -177,7 +171,7 @@ async def init_db():
         );
         """)
         
-        # ✅ КОНВЕРТАЦИЯ ТИПОВ
+        # Конвертация типов
         boolean_fields = [
             'is_vip', 'is_hidden', 'insurance',
             'quest1_done', 'quest2_done', 'quest3_done',
@@ -450,37 +444,7 @@ HELP_TEXT = """🎮 <b>ПОЛНЫЙ СПИСОК ВОЗМОЖНОСТЕЙ БОТ
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    if not user.get("gender"):
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="👨 Мужчина", callback_data="gender_male"),
-            InlineKeyboardButton(text="👩 Женщина", callback_data="gender_female")
-        ]])
-        await message.answer("👋 <b>Добро пожаловать!</b> Выберите ваш пол:", parse_mode="HTML", reply_markup=kb)
-        return
     await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=get_main_keyboard())
-
-@router.callback_query(F.data.startswith("gender_"))
-async def process_gender(callback: CallbackQuery):
-    await callback.answer()
-    gender = "👨" if callback.data == "gender_male" else "👩"
-    avatar_url = AVATARS[gender]
-    
-    async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET gender = $1 WHERE user_id = $2", gender, callback.from_user.id)
-    
-    try:
-        await bot.send_photo(
-            callback.from_user.id,
-            avatar_url,
-            caption=f"✅ Вы выбрали пол: {gender}\nВаш начальный баланс: 1000💰 и 10⭐!\n\nТеперь вы можете играть! 🎮",
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logging.warning(f"Не удалось отправить фото: {e}")
-        await callback.message.answer(f"✅ Вы выбрали пол: {gender}\nВаш начальный баланс: 1000💰 и 10⭐!", parse_mode="HTML")
-    
-    await callback.message.delete()
-    await callback.message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @router.message(F.text.lower().in_(["помощь", "help", "❓ помощь"]))
 async def cmd_help(message: Message):
@@ -494,15 +458,20 @@ async def catch_all(message: Message):
     """Ловит все сообщения, которые не обработаны другими хендлерами"""
     logging.info(f"📩 Получено сообщение: {message.text} от {message.from_user.id}")
     
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    # Проверяем, не является ли сообщение командой с кнопки
+    text = message.text.lower()
     
-    if not user.get("gender"):
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="👨 Мужчина", callback_data="gender_male"),
-            InlineKeyboardButton(text="👩 Женщина", callback_data="gender_female")
-        ]])
-        await message.answer("👋 <b>Добро пожаловать!</b> Выберите ваш пол:", parse_mode="HTML", reply_markup=kb)
-        return
+    # Список известных команд
+    known_commands = [
+        "рулетка", "дуэль", "котики", "казино", "приз", "магазин",
+        "профиль", "статистика", "перевод", "топ", "семья", "квесты",
+        "турнир", "помощь", "start", "help"
+    ]
+    
+    # Если сообщение содержит что-то из списка - игнорируем
+    for cmd in known_commands:
+        if cmd in text:
+            return
     
     await message.answer(
         "❓ Я не понял вашу команду.\n\n"
@@ -514,60 +483,119 @@ async def catch_all(message: Message):
 # ============================================================
 # 📱 ОБРАБОТКА КНОПОК ГЛАВНОГО МЕНЮ
 # ============================================================
-@router.message(F.text.contains("Рулетка"))
+@router.message(F.text.contains("Рулетка") | F.text.contains("🎰"))
 async def btn_roulette(m: Message): 
     await cmd_roulette(m)
 
-@router.message(F.text.contains("Дуэль"))
+@router.message(F.text.contains("Дуэль") | F.text.contains("🤠"))
 async def btn_duel(m: Message): 
     await m.answer("🤠 Напишите в группе: <code>дуэль 100</code>", parse_mode="HTML")
 
-@router.message(F.text.contains("Котики"))
+@router.message(F.text.contains("Котики") | F.text.contains("🐱"))
 async def btn_cats(m: Message): 
     await cmd_cats(m)
 
-@router.message(F.text.contains("Казино"))
+@router.message(F.text.contains("Казино") | F.text.contains("🎰"))
 async def btn_casino(m: Message): 
     await cmd_casino(m)
 
-@router.message(F.text.contains("Приз"))
+@router.message(F.text.contains("Приз") | F.text.contains("🎁"))
 async def btn_prize(m: Message): 
     await cmd_prize(m)
 
-@router.message(F.text.contains("Магазин"))
+@router.message(F.text.contains("Магазин") | F.text.contains("🏪"))
 async def btn_shop(m: Message): 
     await cmd_shop(m)
 
-@router.message(F.text.contains("Профиль"))
+@router.message(F.text.contains("Профиль") | F.text.contains("👤"))
 async def btn_profile(m: Message): 
     await cmd_profile(m)
 
-@router.message(F.text.contains("Статистика"))
+@router.message(F.text.contains("Статистика") | F.text.contains("📊"))
 async def btn_stats(m: Message): 
     await cmd_stats(m)
 
-@router.message(F.text.contains("Перевод"))
+@router.message(F.text.contains("Перевод") | F.text.contains("⭐"))
 async def btn_transfer(m: Message): 
     await m.answer("❌ Формат: <code>перевод @username 10</code>", parse_mode="HTML")
 
-@router.message(F.text.contains("Топ"))
+@router.message(F.text.contains("Топ") | F.text.contains("🏆"))
 async def btn_top(m: Message): 
     await cmd_top(m)
 
-@router.message(F.text.contains("Семья"))
+@router.message(F.text.contains("Семья") | F.text.contains("💍"))
 async def btn_fam(m: Message): 
     await cmd_family(m)
 
-@router.message(F.text.contains("Квесты"))
+@router.message(F.text.contains("Квесты") | F.text.contains("🎯"))
 async def btn_q(m: Message): 
     await cmd_quests(m)
 
-@router.message(F.text.contains("Турнир"))
+@router.message(F.text.contains("Турнир") | F.text.contains("🏆"))
 async def btn_t(m: Message): 
     await cmd_tournament(m)
 
-@router.message(F.text.contains("Помощь"))
+@router.message(F.text.contains("Помощь") | F.text.contains("❓"))
 async def btn_help(m: Message): 
+    await cmd_help(m)
+
+# ============================================================
+# 📱 ДОПОЛНИТЕЛЬНЫЕ ОБРАБОТЧИКИ (ПРЯМОЕ СОВПАДЕНИЕ)
+# ============================================================
+@router.message(F.text == "🎰 Рулетка")
+async def btn_roulette_direct(m: Message): 
+    await cmd_roulette(m)
+
+@router.message(F.text == "🤠 Дуэль")
+async def btn_duel_direct(m: Message): 
+    await m.answer("🤠 Напишите в группе: <code>дуэль 100</code>", parse_mode="HTML")
+
+@router.message(F.text == "🐱 Котики")
+async def btn_cats_direct(m: Message): 
+    await cmd_cats(m)
+
+@router.message(F.text == "🎰 Казино")
+async def btn_casino_direct(m: Message): 
+    await cmd_casino(m)
+
+@router.message(F.text == "🎁 Приз")
+async def btn_prize_direct(m: Message): 
+    await cmd_prize(m)
+
+@router.message(F.text == "🏪 Магазин")
+async def btn_shop_direct(m: Message): 
+    await cmd_shop(m)
+
+@router.message(F.text == "👤 Профиль")
+async def btn_profile_direct(m: Message): 
+    await cmd_profile(m)
+
+@router.message(F.text == "📊 Статистика")
+async def btn_stats_direct(m: Message): 
+    await cmd_stats(m)
+
+@router.message(F.text == "⭐ Перевод")
+async def btn_transfer_direct(m: Message): 
+    await m.answer("❌ Формат: <code>перевод @username 10</code>", parse_mode="HTML")
+
+@router.message(F.text == "🏆 Топ")
+async def btn_top_direct(m: Message): 
+    await cmd_top(m)
+
+@router.message(F.text == "💍 Семья")
+async def btn_fam_direct(m: Message): 
+    await cmd_family(m)
+
+@router.message(F.text == "🎯 Квесты")
+async def btn_q_direct(m: Message): 
+    await cmd_quests(m)
+
+@router.message(F.text == "🏆 Турнир")
+async def btn_t_direct(m: Message): 
+    await cmd_tournament(m)
+
+@router.message(F.text == "❓ Помощь")
+async def btn_help_direct(m: Message): 
     await cmd_help(m)
 
 # ---------------------------------------------------------
@@ -834,7 +862,7 @@ async def process_shoot(callback: CallbackQuery):
         await callback.message.edit_text(f"💀 <b>{shooter_name} побеждает {target_name}!</b>\n🏆 Приз: +{win_amt}💰\n+1 очко в турнир!", parse_mode="HTML")
 
 # ---------------------------------------------------------
-# 🐱 КОТИКИ (С ВЫБОРОМ РЕЖИМА)
+# 🐱 КОТИКИ
 # ---------------------------------------------------------
 @router.message(F.text.lower().startswith(("котики", "🐱 котики")))
 async def cmd_cats(message: Message):
@@ -1397,14 +1425,7 @@ async def cmd_profile(message: Message):
 🏆 Лучшая игра: {best_game} ({best_ratio}%)
 🏟️ Турнирные очки: {user['tournament_score']}"""
 
-    avatar_url = AVATARS.get(user['gender'], None)
-    if avatar_url:
-        try:
-            await bot.send_photo(message.from_user.id, avatar_url, caption=text, parse_mode="HTML")
-        except Exception:
-            await message.answer(text, parse_mode="HTML")
-    else:
-        await message.answer(text, parse_mode="HTML")
+    await message.answer(text, parse_mode="HTML")
 
 # ---------------------------------------------------------
 # 📊 СТАТИСТИКА
@@ -1745,7 +1766,7 @@ async def cmd_adopt(message: Message):
 # ---------------------------------------------------------
 # 👨‍👩‍👧‍👦 ИНФОРМАЦИЯ О СЕМЬЕ
 # ---------------------------------------------------------
-@router.message(F.text.lower() == "семья")
+@router(message, F.text.lower() == "семья")
 async def cmd_family(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     if not user['family_id']:
@@ -1891,7 +1912,7 @@ async def join_tournament(callback: CallbackQuery):
     await callback.message.edit_text("✅ Вы успешно зарегистрированы в турнире!\nУдачи! 🍀", parse_mode="HTML")
 
 # ============================================================
-# 👑 АДМИН-ПАНЕЛЬ (С РАССЫЛКОЙ)
+# 👑 АДМИН-ПАНЕЛЬ
 # ============================================================
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
@@ -1986,7 +2007,8 @@ async def admin_stats(callback: CallbackQuery):
     except Exception as e:
         await callback.message.edit_text(f"❌ Ошибка: {e}", parse_mode="HTML")
 
-# ---------------------------------------------------------# 🎫 СОЗДАНИЕ ПРОМОКОДА
+# ---------------------------------------------------------
+# 🎫 СОЗДАНИЕ ПРОМОКОДА
 # ---------------------------------------------------------
 @router.callback_query(F.data == "admin_create_promo")
 async def admin_create_promo_menu(callback: CallbackQuery):
@@ -2363,11 +2385,7 @@ async def admin_mailing_start(callback: CallbackQuery):
         parse_mode="HTML"
     )
     
-    # Устанавливаем состояние для админа
     admin_mailing_state[callback.from_user.id] = True
-
-# Словарь для хранения состояния рассылки
-admin_mailing_state: Dict[int, bool] = {}
 
 @router.message(Command("cancel_mailing"))
 async def cancel_mailing(message: Message):
@@ -2380,165 +2398,6 @@ async def cancel_mailing(message: Message):
         await message.answer("❌ Рассылка отменена!", parse_mode="HTML")
     else:
         await message.answer("❌ Активная рассылка не найдена!", parse_mode="HTML")
-
-@router.message()
-async def process_mailing(message: Message):
-    """Обработчик для рассылки - ловит сообщения от админа в режиме рассылки"""
-    
-    # Проверяем, находится ли админ в режиме рассылки
-    if message.from_user.id not in admin_mailing_state:
-        return
-    
-    if message.from_user.id != ADMIN_ID:
-        return
-    
-    # Если админ отправил команду - не обрабатываем как рассылку
-    if message.text and message.text.startswith('/'):
-        return
-    
-    # Отправляем сообщение о начале рассылки
-    await message.answer("📨 <b>РАССЫЛКА ЗАПУЩЕНА!</b>\n\n⏳ Идёт отправка...", parse_mode="HTML")
-    
-    # Получаем всех пользователей
-    async with db_pool.acquire() as conn:
-        users = await conn.fetch("SELECT user_id FROM users")
-    
-    total = len(users)
-    success = 0
-    failed = 0
-    
-    # Отправляем каждому пользователю
-    for idx, user in enumerate(users):
-        try:
-            # Копируем сообщение админа
-            if message.text:
-                await bot.send_message(
-                    user['user_id'],
-                    message.text,
-                    parse_mode="HTML"
-                )
-            elif message.photo:
-                await bot.send_photo(
-                    user['user_id'],
-                    message.photo[-1].file_id,
-                    caption=message.caption or ""
-                )
-            elif message.animation:
-                await bot.send_animation(
-                    user['user_id'],
-                    message.animation.file_id,
-                    caption=message.caption or ""
-                )
-            else:
-                await bot.send_message(
-                    user['user_id'],
-                    "📨 Сообщение от администратора",
-                    parse_mode="HTML"
-                )
-            success += 1
-            
-            # Небольшая задержка, чтобы не блокировать бота
-            if idx % 10 == 0:
-                await asyncio.sleep(0.5)
-                
-        except Exception as e:
-            failed += 1
-            logging.warning(f"❌ Не удалось отправить сообщение пользователю {user['user_id']}: {e}")
-    
-    # Удаляем состояние рассылки
-    if message.from_user.id in admin_mailing_state:
-        del admin_mailing_state[message.from_user.id]
-    
-    # Отправляем отчёт
-    await message.answer(
-        f"✅ <b>РАССЫЛКА ЗАВЕРШЕНА!</b>\n\n"
-        f"📤 Отправлено: {success}\n"
-        f"❌ Не доставлено: {failed}\n"
-        f"👥 Всего пользователей: {total}",
-        parse_mode="HTML"
-    )
-
-# ---------------------------------------------------------
-# 🔍 ПРОВЕРКА БД (АДМИН)
-# ---------------------------------------------------------
-@router.callback_query(F.data == "admin_check_db")
-async def admin_check_db(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("❌ У вас нет прав!", show_alert=True)
-        return
-    
-    await callback.answer()
-    
-    async with db_pool.acquire() as conn:
-        columns = await conn.fetch("""
-            SELECT column_name, data_type 
-            FROM information_schema.columns 
-            WHERE table_name = 'users' 
-            AND column_name IN ('is_hidden', 'is_vip', 'insurance', 'quest1_done', 'gender')
-        """)
-        
-        text = "🔍 <b>ПРОВЕРКА БД</b>\n\n"
-        text += "📌 <b>Типы колонок в таблице users:</b>\n\n"
-        for col in columns:
-            text += f"📌 {col['column_name']}: {col['data_type']}\n"
-        
-        tables = await conn.fetch("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
-        
-        text += "\n📌 <b>Таблицы в БД:</b>\n"
-        for t in tables:
-            count = await conn.fetchval(f"SELECT COUNT(*) FROM {t['table_name']}")
-            text += f"📊 {t['table_name']}: {count} записей\n"
-    
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад в админ-панель", callback_data="admin_back")]
-    ])
-    
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-
-# ---------------------------------------------------------
-# 🔙 НАЗАД В АДМИН-ПАНЕЛЬ
-# ---------------------------------------------------------
-@router.callback_query(F.data == "admin_back")
-async def admin_back(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("❌ У вас нет прав!", show_alert=True)
-        return
-    
-    await callback.answer()
-    await cmd_admin(callback.message)
-
-# ---------------------------------------------------------
-# 🎫 ПРОМОКОД (ДЛЯ ПОЛЬЗОВАТЕЛЕЙ)
-# ---------------------------------------------------------
-@router.message(Command("promo"))
-async def cmd_promo(message: Message, command: CommandObject):
-    if not command.args:
-        await message.answer("❌ Укажите промокод: /promo КОД", parse_mode="HTML")
-        return
-    
-    code = command.args.strip()
-    uid = message.from_user.id
-    
-    async with db_pool.acquire() as conn:
-        p = await conn.fetchrow("SELECT * FROM promos WHERE code = $1", code)
-        if not p:
-            await message.answer("❌ Промокод не найден!", parse_mode="HTML")
-            return
-        
-        used = await conn.fetchrow("SELECT * FROM user_promos WHERE user_id = $1 AND code = $2", uid, code)
-        if used:
-            await message.answer("❌ Вы уже активировали этот промокод!", parse_mode="HTML")
-            return
-        
-        if p['uses'] >= p['max_uses']:
-            await message.answer("❌ Промокод больше не действует!", parse_mode="HTML")
-            return
-        
-        await conn.execute("INSERT INTO user_promos (user_id, code) VALUES ($1, $2)", uid, code)
-        await conn.execute("UPDATE promos SET uses = uses + 1 WHERE code = $1", code)
-        await conn.execute("UPDATE users SET stars = stars + $1, coins = coins + $2 WHERE user_id = $3", p['stars'], p['coins'], uid)
-    
-    await message.answer(f"🎉 <b>Промокод активирован!</b>\n+{p['coins']}💰 +{p['stars']}⭐!", parse_mode="HTML")
 
 # ---------------------------------------------------------
 # 🚀 ЗАПУСК БОТА
