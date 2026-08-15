@@ -1,1 +1,1702 @@
+import os
+import random
+import asyncio
+import datetime
+import logging
+from typing import Optional, Dict, Any, List
 
+from aiogram import Bot, Dispatcher, Router, F
+from aiogram.enums import ChatType
+from aiogram.types import (
+    Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton,
+    InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+)
+from aiogram.filters import Command, CommandObject
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiohttp import web
+import asyncpg
+
+# ---------------------------------------------------------
+# НАСТРОЙКИ И ИНИЦИАЛИЗАЦИЯ
+# ---------------------------------------------------------
+logging.basicConfig(level=logging.INFO)
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+DATABASE_URL = os.getenv("DATABASE_URL")
+CHAT_ID = os.getenv("CHAT_ID", "")
+PORT = int(os.getenv("PORT", 8080))
+
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
+router = Router()
+dp.include_router(router)
+
+db_pool: Optional[asyncpg.Pool] = None
+
+# Глобальные состояния игр (в ОЗУ)
+active_roulettes: Dict[int, dict] = {}
+active_duels: Dict[str, dict] = {}
+active_cats: Dict[int, dict] = {}
+pending_marriages: Dict[str, dict] = {}
+pending_renames: Dict[str, dict] = {}
+
+# Аватарки для профиля
+AVATARS = {
+    "👨": "https://i.ibb.co/TMDrGsZ9/5472030760698059296-120.jpg",
+    "👩": "https://i.ibb.co/KzFmdF60/5472030760698059295-121.jpg"
+}
+
+# ---------------------------------------------------------
+# ВЕБ-СЕРВЕР ДЛЯ RENDER
+# ---------------------------------------------------------
+async def handle_ping(request):
+    return web.Response(text="Bot is running 24/7!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    logging.info(f"Веб-сервер запущен на порту {PORT}")
+
+# ---------------------------------------------------------
+# КЛАВИАТУРЫ
+# ---------------------------------------------------------
+def get_main_keyboard() -> ReplyKeyboardMarkup:
+    kb = [
+        [KeyboardButton(text="🎰 Рулетка"), KeyboardButton(text="🤠 Дуэль"), KeyboardButton(text="🐱 Котики")],
+        [KeyboardButton(text="🎰 Казино"), KeyboardButton(text="🎁 Приз"), KeyboardButton(text="🏪 Магазин")],
+        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="📊 Статистика"), KeyboardButton(text="⭐ Перевод")],
+        [KeyboardButton(text="🏆 Топ"), KeyboardButton(text="💍 Семья"), KeyboardButton(text="🎯 Квесты")],
+        [KeyboardButton(text="🏆 Турнир"), KeyboardButton(text="❓ Помощь")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+# ---------------------------------------------------------
+# БАЗА ДАННЫХ (POSTGRESQL)
+# ---------------------------------------------------------
+async def init_db():
+    global db_pool
+    clean_url = DATABASE_URL.replace("?sslmode=require", "").replace("&sslmode=require", "")
+    db_pool = await asyncpg.create_pool(clean_url, ssl="require")
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            username VARCHAR(255),
+            custom_nick VARCHAR(255) DEFAULT NULL,
+            custom_emoji VARCHAR(50) DEFAULT '',
+            gender VARCHAR(10) DEFAULT NULL,
+            coins BIGINT DEFAULT 1000,
+            stars INT DEFAULT 10,
+            is_vip BOOLEAN DEFAULT FALSE,
+            vip_until TIMESTAMP DEFAULT NULL,
+            is_hidden BOOLEAN DEFAULT FALSE,
+            insurance BOOLEAN DEFAULT FALSE,
+            family_id INT DEFAULT NULL,
+            spouse_id BIGINT DEFAULT NULL,
+            divorce_until DATE DEFAULT NULL,
+            daily_stars_transferred INT DEFAULT 0,
+            last_transfer_date DATE DEFAULT NULL,
+            last_prize_date DATE DEFAULT NULL,
+            wins INT DEFAULT 0,
+            losses INT DEFAULT 0,
+            total_games INT DEFAULT 0,
+            total_coins_won BIGINT DEFAULT 0,
+            daily_net_win INT DEFAULT 0,
+            streak_days INT DEFAULT 0,
+            last_active_date DATE DEFAULT NULL,
+            last_game_result VARCHAR(50) DEFAULT 'Нет',
+            top3_family_count INT DEFAULT 0,
+            roulette_games INT DEFAULT 0,
+            roulette_wins INT DEFAULT 0,
+            duel_games INT DEFAULT 0,
+            duel_wins INT DEFAULT 0,
+            cat_games INT DEFAULT 0,
+            cat_wins INT DEFAULT 0,
+            casino_games INT DEFAULT 0,
+            casino_wins INT DEFAULT 0,
+            quests_completed INT DEFAULT 0,
+            quest1 INT DEFAULT 0,
+            quest2 INT DEFAULT 0,
+            quest3 INT DEFAULT 0,
+            quest4 INT DEFAULT 0,
+            quest5 INT DEFAULT 0,
+            quest1_done BOOLEAN DEFAULT FALSE,
+            quest2_done BOOLEAN DEFAULT FALSE,
+            quest3_done BOOLEAN DEFAULT FALSE,
+            quest4_done BOOLEAN DEFAULT FALSE,
+            quest5_done BOOLEAN DEFAULT FALSE,
+            quest_bonus_claimed BOOLEAN DEFAULT FALSE,
+            tournament_wins INT DEFAULT 0,
+            tournament_fee_paid BOOLEAN DEFAULT FALSE,
+            tournament_score INT DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS families (
+            id SERIAL PRIMARY KEY,
+            user1_id BIGINT NOT NULL,
+            user2_id BIGINT NOT NULL,
+            name VARCHAR(255) DEFAULT NULL,
+            score INT DEFAULT 0,
+            created_at DATE NOT NULL,
+            top1_count INT DEFAULT 0,
+            last_anniversary_month INT DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS children (
+            id SERIAL PRIMARY KEY,
+            family_id INT NOT NULL,
+            child_id BIGINT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS achievements (
+            user_id BIGINT NOT NULL,
+            ach_id VARCHAR(50) NOT NULL,
+            PRIMARY KEY (user_id, ach_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS promos (
+            code VARCHAR(50) PRIMARY KEY,
+            stars INT DEFAULT 0,
+            coins BIGINT DEFAULT 0,
+            vip_days INT DEFAULT 0,
+            max_uses INT DEFAULT 1,
+            uses INT DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS user_promos (
+            user_id BIGINT NOT NULL,
+            code VARCHAR(50) NOT NULL,
+            PRIMARY KEY (user_id, code)
+        );
+
+        CREATE TABLE IF NOT EXISTS tournament_participants (
+            user_id BIGINT PRIMARY KEY,
+            wins INT DEFAULT 0
+        );
+        """)
+
+async def get_or_create_user(user_id: int, username: Optional[str]) -> dict:
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+        today = datetime.date.today()
+        if not row:
+            await conn.execute(
+                "INSERT INTO users (user_id, username, last_active_date) VALUES ($1, $2, $3)",
+                user_id, username or f"Игрок_{user_id}", today
+            )
+            row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+        else:
+            if username and row['username'] != username:
+                await conn.execute("UPDATE users SET username = $1 WHERE user_id = $2", username, user_id)
+                row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+        return dict(row)
+
+# ---------------------------------------------------------
+# РАНГИ И ТИТУЛЫ
+# ---------------------------------------------------------
+def calculate_rank(wins: int, total: int) -> str:
+    if total < 10: return "🆕 Новобранец"
+    winrate = (wins / total) * 100
+    if winrate <= 20: return "🥚 Новичок"
+    elif winrate <= 40: return "🪶 Любитель"
+    elif winrate <= 55: return "⚔️ Боец"
+    elif winrate <= 70: return "🛡️ Ветеран"
+    elif winrate <= 85: return "🏅 Мастер"
+    elif winrate <= 95: return "👑 Легенда"
+    else: return "🌟 Бог игры"
+
+async def get_user_titles(user: dict) -> list:
+    titles = []
+    if user['roulette_games'] >= 100: titles.append("🃏 Картёжник")
+    if user['duel_wins'] >= 100: titles.append("🤠 Шериф")
+    if user['cat_games'] >= 100: titles.append("🐱 Котолюб")
+    if user['coins'] >= 50000: titles.append("💰 Миллионер")
+    if user['stars'] >= 200: titles.append("⭐ Коллекционер")
+    if user['casino_wins'] >= 50: titles.append("🎰 Казино-король")
+
+    if user['family_id']:
+        async with db_pool.acquire() as conn:
+            fam = await conn.fetchrow("SELECT created_at FROM families WHERE id = $1", user['family_id'])
+            if fam and fam['created_at']:
+                if (datetime.date.today() - fam['created_at']).days >= 365:
+                    titles.append("👑 Золотая семья")
+    return titles
+
+# ---------------------------------------------------------
+# АЧИВКИ
+# ---------------------------------------------------------
+async def check_achievements(user_id: int):
+    async with db_pool.acquire() as conn:
+        u = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+        if not u: return
+
+        rows = await conn.fetch("SELECT ach_id FROM achievements WHERE user_id = $1", user_id)
+        unlocked = {r['ach_id'] for r in rows}
+
+        ach_data = [
+            ("first_step", u['total_games'] >= 1, 10, 0, "🆕 Первый шаг"),
+            ("first_win", u['wins'] >= 1, 20, 1, "🎯 Первый выигрыш"),
+            ("wins_10", u['wins'] >= 10, 50, 2, "💪 10 побед"),
+            ("wins_50", u['wins'] >= 50, 100, 5, "🏅 50 побед"),
+            ("wins_100", u['wins'] >= 100, 200, 10, "👑 100 побед"),
+            ("rouletto", u['roulette_wins'] >= 10, 50, 2, "🎰 Рулеточник"),
+            ("duelist", u['duel_wins'] >= 10, 50, 2, "🤠 Дуэлянт"),
+            ("catlover", u['cat_wins'] >= 10, 50, 2, "🐱 Котовод"),
+            ("rich", u['coins'] >= 10000, 200, 5, "💰 Богач"),
+            ("starry", u['stars'] >= 50, 0, 10, "⭐ Звёздный"),
+            ("games_1000", u['total_games'] >= 1000, 1000, 20, "👾 1000 игр"),
+            ("in_love", u['family_id'] is not None, 0, 5, "❤️ Любовь"),
+        ]
+
+        for ach_id, cond, r_coins, r_stars, title in ach_data:
+            if cond and ach_id not in unlocked:
+                await conn.execute("INSERT INTO achievements (user_id, ach_id) VALUES ($1, $2)", user_id, ach_id)
+                await conn.execute("UPDATE users SET coins = coins + $1, stars = stars + $2 WHERE user_id = $3", r_coins, r_stars, user_id)
+                try:
+                    await bot.send_message(user_id, f"🏆 <b>АЧИВКА!</b> {title}\n+{r_coins}💰, +{r_stars}⭐", parse_mode="HTML")
+                except Exception:
+                    pass
+
+# ---------------------------------------------------------
+# КВЕСТЫ
+# ---------------------------------------------------------
+async def check_quests(user_id: int):
+    async with db_pool.acquire() as conn:
+        u = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+        if not u: return
+
+        # Квест 1: Сыграть 10 игр
+        if u['total_games'] >= 10 and not u['quest1_done']:
+            await conn.execute("UPDATE users SET coins = coins + 30, quest1_done = TRUE, quests_completed = quests_completed + 1 WHERE user_id = $1", user_id)
+            await bot.send_message(user_id, "✅ Квест 1 выполнен! +30💰")
+
+        # Квест 2: Выиграть 5 дуэлей
+        if u['duel_wins'] >= 5 and not u['quest2_done']:
+            await conn.execute("UPDATE users SET stars = stars + 2, quest2_done = TRUE, quests_completed = quests_completed + 1 WHERE user_id = $1", user_id)
+            await bot.send_message(user_id, "✅ Квест 2 выполнен! +2⭐")
+
+        # Квест 3: Угадать число в рулетке
+        if u['roulette_wins'] >= 1 and not u['quest3_done']:
+            await conn.execute("UPDATE users SET stars = stars + 5, quest3_done = TRUE, quests_completed = quests_completed + 1 WHERE user_id = $1", user_id)
+            await bot.send_message(user_id, "✅ Квест 3 выполнен! +5⭐")
+
+        # Квест 4: Сыграть в котиков 3 раза
+        if u['cat_games'] >= 3 and not u['quest4_done']:
+            await conn.execute("UPDATE users SET coins = coins + 20, quest4_done = TRUE, quests_completed = quests_completed + 1 WHERE user_id = $1", user_id)
+            await bot.send_message(user_id, "✅ Квест 4 выполнен! +20💰")
+
+        # Квест 5: Выиграть 500 монет за день
+        if u['daily_net_win'] >= 500 and not u['quest5_done']:
+            await conn.execute("UPDATE users SET stars = stars + 3, quest5_done = TRUE, quests_completed = quests_completed + 1 WHERE user_id = $1", user_id)
+            await bot.send_message(user_id, "✅ Квест 5 выполнен! +3⭐")
+
+        # Бонус за все квесты
+        if u['quests_completed'] >= 5 and not u['quest_bonus_claimed']:
+            await conn.execute("UPDATE users SET stars = stars + 10, quest_bonus_claimed = TRUE WHERE user_id = $1", user_id)
+            await bot.send_message(user_id, "🎉 БОНУС! Все квесты выполнены! +10⭐")
+
+async def reset_quests():
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            UPDATE users SET 
+                quest1_done = FALSE, quest2_done = FALSE, quest3_done = FALSE,
+                quest4_done = FALSE, quest5_done = FALSE, quest_bonus_claimed = FALSE,
+                quests_completed = 0
+        """)
+
+# ---------------------------------------------------------
+# ТУРНИР
+# ---------------------------------------------------------
+async def get_tournament_time_left() -> str:
+    now = datetime.datetime.utcnow()
+    # Воскресенье 23:59
+    days_until_sunday = (6 - now.weekday()) % 7
+    if days_until_sunday == 0 and now.hour >= 23 and now.minute >= 59:
+        return "⏳ Турнир завершается СЕЙЧАС!"
+    target = (now + datetime.timedelta(days=days_until_sunday)).replace(hour=23, minute=59, second=0, microsecond=0)
+    diff = target - now
+    hours, remainder = divmod(diff.seconds, 3600)
+    minutes, _ = divmod(remainder, 60)
+    return f"⏳ Осталось: {diff.days}д {hours}ч {minutes}м"
+
+async def finish_tournament():
+    async with db_pool.acquire() as conn:
+        # Получаем топ-3 участников
+        participants = await conn.fetch("""
+            SELECT user_id, tournament_score FROM users 
+            WHERE tournament_fee_paid = TRUE AND tournament_score > 0
+            ORDER BY tournament_score DESC LIMIT 3
+        """)
+        
+        if not participants: return
+        
+        # Считаем призовой фонд
+        total_fee = await conn.fetchval("SELECT COUNT(*) * 10 FROM users WHERE tournament_fee_paid = TRUE")
+        prize_pool = 500 + total_fee
+        
+        prizes = [int(prize_pool * 0.6), int(prize_pool * 0.3), int(prize_pool * 0.1)]
+        
+        for idx, p in enumerate(participants):
+            stars_earned = prizes[idx] if idx < len(prizes) else 0
+            await conn.execute("UPDATE users SET stars = stars + $1, tournament_fee_paid = FALSE, tournament_score = 0 WHERE user_id = $2", 
+                             stars_earned, p['user_id'])
+            
+            # Отправляем уведомление
+            try:
+                await bot.send_message(p['user_id'], 
+                    f"🏆 <b>ТУРНИР ЗАВЕРШЕН!</b>\n"
+                    f"Ваше место: #{idx+1}\n"
+                    f"Награда: +{stars_earned}⭐\n"
+                    f"Всего побед: {p['tournament_score']}",
+                    parse_mode="HTML")
+            except Exception:
+                pass
+        
+        # Сбрасываем всем остальным участникам
+        await conn.execute("UPDATE users SET tournament_fee_paid = FALSE, tournament_score = 0 WHERE tournament_fee_paid = TRUE")
+
+# ---------------------------------------------------------
+# АВТОРИЗАЦИЯ И РЕГИСТРАЦИЯ
+# ---------------------------------------------------------
+HELP_TEXT = """🎮 <b>ПОЛНЫЙ СПИСОК ВОЗМОЖНОСТЕЙ БОТА</b>
+
+⭐ Звёзды — ИГРОВАЯ ВАЛЮТА!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎲 <b>ИГРЫ</b>
+🎰 Рулетка — р / рулетка [ставка] [сумма]
+🤠 Дуэль — дуэль [сумма] (Только в чатах)
+🐱 Котики — котики [ставка] (Только в чатах)
+🎰 Казино — казино (За 25⭐)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 <b>ЭКОНОМИКА</b>
+🎁 Приз — приз (Раз в день, ТОЛЬКО в ЛС)
+🏪 Магазин — магазин
+⭐ Перевод — перевод @username [сумма] (макс 25⭐/день)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 <b>ПРОФИЛЬ И ТОПЫ</b>
+👤 Профиль — профиль / п
+📊 Статистика — статистика / стата
+🏆 Топы — топ, топ_семей
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💍 <b>СЕМЬЯ</b>
+💍 обручиться [имя_семьи]
+👶 ребёнок @username
+💔 развод
+👨‍👩‍👧‍👦 семья
+🎂 годовщина
+✏️ сменить_имя_семьи @партнёр НовоеИмя
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 <b>КВЕСТЫ И ТУРНИРЫ</b>
+🎯 квесты
+🏆 турнир
+"""
+
+@router.message(Command("start"))
+async def cmd_start(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if not user['gender']:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="👨 Мужчина", callback_data="gender_male"),
+            InlineKeyboardButton(text="👩 Женщина", callback_data="gender_female")
+        ]])
+        await message.answer("👋 <b>Добро пожаловать!</b> Для начала выберите ваш пол:", parse_mode="HTML", reply_markup=kb)
+        return
+
+    reply_markup = get_main_keyboard() if message.chat.type == ChatType.PRIVATE else None
+    await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=reply_markup)
+
+@router.callback_query(F.data.startswith("gender_"))
+async def process_gender(callback: CallbackQuery):
+    gender = "👨" if callback.data == "gender_male" else "👩"
+    avatar_url = AVATARS[gender]
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET gender = $1 WHERE user_id = $2", gender, callback.from_user.id)
+    
+    # Отправляем аватарку
+    await bot.send_photo(
+        callback.from_user.id,
+        avatar_url,
+        caption=f"✅ Вы выбрали пол: {gender}\nВаш начальный баланс: 1000💰 и 10⭐!",
+        parse_mode="HTML"
+    )
+    
+    reply_markup = get_main_keyboard() if callback.message.chat.type == ChatType.PRIVATE else None
+    await callback.message.delete()
+    await callback.message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=reply_markup)
+
+@router.message(F.text.lower().in_(["помощь", "help", "❓ помощь"]))
+async def cmd_help(message: Message):
+    reply_markup = get_main_keyboard() if message.chat.type == ChatType.PRIVATE else None
+    await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=reply_markup)
+
+# ============================================================
+# 🎰 РУЛЕТКА (С КНОПКОЙ ОТМЕНЫ)
+# ============================================================
+@router.message(F.text.lower().startswith(("рулетка", "р", "🎰 рулетка")))
+async def cmd_roulette(message: Message):
+    chat_id = message.chat.id
+    args = message.text.split()
+
+    if len(args) < 3:
+        await message.answer(
+            "🎰 <b>Как сделать ставку:</b>\n"
+            "<code>р красное 100</code> — ставка на красное (x2)\n"
+            "<code>р 15 100</code> — на число 1-30 (x50)\n"
+            "<code>р 0 100</code> — на зелёный 0 (x100)\n"
+            "<code>р чет 100</code> — на чётное (x2)\n"
+            "Мин. 50💰, таймер 60 сек, макс 10 ставок на чат.",
+            parse_mode="HTML"
+        )
+        return
+
+    bet_type = args[1].lower()
+    try:
+        bet_amount = int(args[2])
+    except ValueError:
+        await message.answer("❌ Ставка должна быть числом!", parse_mode="HTML")
+        return
+
+    if bet_amount < 50:
+        await message.answer("❌ Мин. ставка: 50 монет!", parse_mode="HTML")
+        return
+
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if user['coins'] < bet_amount:
+        await message.answer("❌ Недостаточно монет!", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", bet_amount, user['user_id'])
+
+    if chat_id not in active_roulettes:
+        active_roulettes[chat_id] = {"bets": [], "timer_task": asyncio.create_task(run_roulette_timer(chat_id))}
+
+    roul = active_roulettes[chat_id]
+    if len(roul["bets"]) >= 10:
+        await message.answer("❌ Лимит 10 ставок в этом раунде!", parse_mode="HTML")
+        return
+
+    uname = user['custom_nick'] or user['username'] or f"Игрок_{user['user_id']}"
+    roul["bets"].append({
+        "user_id": user['user_id'],
+        "username": uname,
+        "type": bet_type,
+        "amount": bet_amount,
+        "insurance": user['insurance']
+    })
+
+    # Кнопка отмены
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="❌ Отменить ставку", callback_data=f"cancel_roulette_{chat_id}_{len(roul['bets'])-1}")
+    ]])
+    
+    await message.answer(
+        f"✅ Ставка {uname} — {bet_amount}💰 на <b>{bet_type}</b>! ({len(roul['bets'])}/10)\n⏳ Таймер: 60 сек",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+@router.callback_query(F.data.startswith("cancel_roulette_"))
+async def cancel_roulette_bet(callback: CallbackQuery):
+    _, _, chat_id_str, bet_idx = callback.data.split("_")
+    chat_id = int(chat_id_str)
+    bet_idx = int(bet_idx)
+    
+    if chat_id not in active_roulettes:
+        await callback.answer("Ставка уже обработана!", show_alert=True)
+        return
+    
+    roul = active_roulettes[chat_id]
+    if bet_idx >= len(roul["bets"]):
+        await callback.answer("Ставка уже обработана!", show_alert=True)
+        return
+    
+    bet = roul["bets"][bet_idx]
+    if bet["user_id"] != callback.from_user.id:
+        await callback.answer("Это не ваша ставка!", show_alert=True)
+        return
+    
+    # Возвращаем монеты
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET coins = coins + $1 WHERE user_id = $2", bet["amount"], callback.from_user.id)
+    
+    # Удаляем ставку
+    roul["bets"].pop(bet_idx)
+    await callback.message.edit_text(f"❌ Ставка отменена! Возвращено {bet['amount']}💰", parse_mode="HTML")
+    await callback.answer("Ставка отменена!", show_alert=True)
+
+async def run_roulette_timer(chat_id: int):
+    await asyncio.sleep(60)
+    if chat_id not in active_roulettes: return
+
+    roul = active_roulettes.pop(chat_id)
+    bets = roul["bets"]
+    
+    if not bets:
+        return
+
+    winning_number = random.randint(0, 30)
+    is_zero = (winning_number == 0)
+    is_even = (winning_number % 2 == 0) if not is_zero else None
+    is_red = (winning_number % 2 != 0) if not is_zero else None
+
+    color_str = "🟢 0" if is_zero else ("🔴 " + str(winning_number) if is_red else "⚫ " + str(winning_number))
+    res_text = f"🎰 <b>РУЛЕТКА! Выпало: {color_str}</b>\n\n"
+
+    async with db_pool.acquire() as conn:
+        for b in bets:
+            uid, uname, b_type, amount = b["user_id"], b["username"], b["type"], b["amount"]
+            won, mult = False, 0
+
+            if b_type in ["красное", "red"] and is_red: won, mult = True, 2
+            elif b_type in ["черное", "чёрное", "black"] and (not is_red and not is_zero): won, mult = True, 2
+            elif b_type in ["чет", "чёт", "even"] and is_even: won, mult = True, 2
+            elif b_type in ["нечет", "нечёт", "odd"] and (not is_even and not is_zero): won, mult = True, 2
+            elif b_type == "0" and is_zero: won, mult = True, 100
+            elif b_type.isdigit() and int(b_type) == winning_number: won, mult = True, 50
+
+            if won:
+                win_coins = amount * mult
+                await conn.execute("""UPDATE users SET coins = coins + $1, wins = wins + 1, total_games = total_games + 1,
+                    roulette_games = roulette_games + 1, roulette_wins = roulette_wins + 1, total_coins_won = total_coins_won + $1
+                    WHERE user_id = $2""", win_coins, uid)
+                res_text += f"✅ {uname}: +{win_coins}💰\n"
+            else:
+                refund = (amount // 2) if b["insurance"] else 0
+                if refund > 0:
+                    await conn.execute("UPDATE users SET coins = coins + $1, insurance = FALSE WHERE user_id = $2", refund, uid)
+
+                await conn.execute("UPDATE users SET losses = losses + 1, total_games = total_games + 1, roulette_games = roulette_games + 1 WHERE user_id = $1", uid)
+                res_text += f"❌ {uname}: -{amount}💰 {'(страховка)' if refund else ''}\n"
+            
+            # Проверяем ачивки и квесты
+            await check_achievements(uid)
+            await check_quests(uid)
+
+    await bot.send_message(chat_id, res_text, parse_mode="HTML")
+
+# ============================================================
+# 🤠 ДУЭЛЬ (С КНОПКОЙ ОТМЕНЫ)
+# ============================================================
+@router.message(F.text.lower().startswith(("дуэль", "🤠 дуэль")))
+async def cmd_duel(message: Message):
+    if message.chat.type == ChatType.PRIVATE:
+        await message.answer("⚠️ Дуэли доступны только в групповых чатах!", parse_mode="HTML")
+        return
+
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("🤠 Формат: <code>дуэль 100</code>", parse_mode="HTML")
+        return
+    try:
+        amount = int(args[1])
+    except ValueError:
+        await message.answer("❌ Ставка должна быть числом!", parse_mode="HTML")
+        return
+
+    if amount < 10:
+        await message.answer("❌ Мин. ставка: 10 монет!", parse_mode="HTML")
+        return
+
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if user['coins'] < amount:
+        await message.answer("❌ Недостаточно монет!", parse_mode="HTML")
+        return
+
+    duel_id = f"{message.chat.id}_{message.from_user.id}_{random.randint(100,999)}"
+    uname = user['custom_nick'] or user['username'] or message.from_user.first_name
+
+    active_duels[duel_id] = {
+        "p1": user['user_id'],
+        "p1_name": uname,
+        "p2": None,
+        "p2_name": None,
+        "amount": amount,
+        "chat_id": message.chat.id,
+        "pending": True,
+        "created_by": message.from_user.id
+    }
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=f"🎯 Принять дуэль ({amount}💰)", callback_data=f"accept_duel_{duel_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"cancel_duel_{duel_id}")
+        ]
+    ])
+    await message.answer(f"🤠 <b>{uname} вызывает на дуэль!</b>\nСтавка: {amount}💰\n⏳ Таймер: 60 сек", reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("cancel_duel_"))
+async def cancel_duel(callback: CallbackQuery):
+    duel_id = callback.data.replace("cancel_duel_", "")
+    if duel_id not in active_duels: return
+    
+    duel = active_duels[duel_id]
+    if callback.from_user.id != duel["created_by"]:
+        await callback.answer("Отменить может только создатель!", show_alert=True)
+        return
+    
+    # Возвращаем монеты создателю
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET coins = coins + $1 WHERE user_id = $2", duel["amount"], duel["p1"])
+    
+    del active_duels[duel_id]
+    await callback.message.edit_text("❌ Дуэль отменена! Ставка возвращена.", parse_mode="HTML")
+    await callback.answer("Дуэль отменена!", show_alert=True)
+
+@router.callback_query(F.data.startswith("accept_duel_"))
+async def process_accept_duel(callback: CallbackQuery):
+    duel_id = callback.data.replace("accept_duel_", "")
+    if duel_id not in active_duels: 
+        await callback.answer("Дуэль уже завершена!", show_alert=True)
+        return
+
+    duel = active_duels[duel_id]
+    if not duel["pending"]:
+        await callback.answer("Дуэль уже началась!", show_alert=True)
+        return
+    
+    p1_id, p2_id = duel["p1"], callback.from_user.id
+    if p1_id == p2_id:
+        await callback.answer("Нельзя вызвать самого себя!", show_alert=True)
+        return
+
+    p2_user = await get_or_create_user(p2_id, callback.from_user.username)
+    if p2_user['coins'] < duel["amount"]:
+        await callback.answer("У вас недостаточно монет!", show_alert=True)
+        return
+
+    # Списываем монеты у второго игрока
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", duel["amount"], p2_id)
+
+    p2_name = p2_user['custom_nick'] or p2_user['username'] or callback.from_user.first_name
+    duel["pending"] = False
+    duel["p2"] = p2_id
+    duel["p2_name"] = p2_name
+    duel["turn"] = p1_id
+    duel["p1_hp"] = 100
+    duel["p2_hp"] = 100
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="💥 ВЫСТРЕЛ!", callback_data=f"shoot_{duel_id}")
+    ]])
+    await callback.message.edit_text(
+        f"🤠 <b>ДУЭЛЬ НАЧАЛАСЬ!</b>\n{duel['p1_name']} (100 HP) vs {p2_name} (100 HP)\n\n👉 <b>Ход:</b> {duel['p1_name']}",
+        reply_markup=kb, parse_mode="HTML"
+    )
+
+@router.callback_query(F.data.startswith("shoot_"))
+async def process_shoot(callback: CallbackQuery):
+    duel_id = callback.data.replace("shoot_", "")
+    if duel_id not in active_duels: return
+
+    duel = active_duels[duel_id]
+    if duel["pending"]:
+        await callback.answer("Дуэль еще не началась!", show_alert=True)
+        return
+    
+    shooter_id = callback.from_user.id
+    if shooter_id != duel["turn"]:
+        await callback.answer("Сейчас не ваш ход!", show_alert=True)
+        return
+
+    is_p1 = (shooter_id == duel["p1"])
+    target_id = duel["p2"] if is_p1 else duel["p1"]
+    shooter_name = duel["p1_name"] if is_p1 else duel["p2_name"]
+    target_name = duel["p2_name"] if is_p1 else duel["p1_name"]
+
+    damage = random.randint(25, 55)
+    if is_p1:
+        duel["p2_hp"] -= damage
+        target_hp = max(0, duel["p2_hp"])
+    else:
+        duel["p1_hp"] -= damage
+        target_hp = max(0, duel["p1_hp"])
+
+    if target_hp <= 0:
+        winner_id, loser_id = shooter_id, target_id
+        tot_pot = duel["amount"] * 2
+        win_amt = int(tot_pot * 0.9)
+
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE users SET coins = coins - $1, losses = losses + 1, duel_games = duel_games + 1 WHERE user_id = $2", duel["amount"], loser_id)
+            await conn.execute("UPDATE users SET coins = coins + $1, wins = wins + 1, duel_games = duel_games + 1, duel_wins = duel_wins + 1 WHERE user_id = $2", win_amt - duel["amount"], winner_id)
+            # Обновляем турнирные очки
+            await conn.execute("UPDATE users SET tournament_score = tournament_score + 1 WHERE user_id = $1", winner_id)
+
+        # Проверяем ачивки и квесты
+        await check_achievements(winner_id)
+        await check_achievements(loser_id)
+        await check_quests(winner_id)
+        await check_quests(loser_id)
+
+        del active_duels[duel_id]
+        await callback.message.edit_text(f"💀 <b>{shooter_name} убивает {target_name}!</b>\n🏆 Победитель: {shooter_name} (+{win_amt}💰, комиссия 10%).\n+1 очко в турнир!", parse_mode="HTML")
+    else:
+        duel["turn"] = target_id
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="💥 ВЫСТРЕЛ!", callback_data=f"shoot_{duel_id}")
+        ]])
+        await callback.message.edit_text(
+            f"🔫 <b>{shooter_name} наносит {damage} урона!</b>\n"
+            f"{duel['p1_name']}: {duel['p1_hp']} HP\n"
+            f"{duel['p2_name']}: {duel['p2_hp']} HP\n\n👉 <b>Ход:</b> {target_name}",
+            reply_markup=kb, parse_mode="HTML"
+        )
+
+# ============================================================
+# 🐱 КОТИКИ
+# ============================================================
+@router.message(F.text.lower().startswith(("котики", "🐱 котики")))
+async def cmd_cats(message: Message):
+    if message.chat.type == ChatType.PRIVATE:
+        await message.answer("⚠️ Игра в котиков доступна только в чатах!", parse_mode="HTML")
+        return
+
+    chat_id = message.chat.id
+    args = message.text.split()
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer("🐱 Формат: <code>котики 100</code>", parse_mode="HTML")
+        return
+    
+    bet = int(args[1])
+    if bet < 10:
+        await message.answer("❌ Мин. ставка: 10 монет!", parse_mode="HTML")
+        return
+
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if user['coins'] < bet:
+        await message.answer("❌ Недостаточно монет!", parse_mode="HTML")
+        return
+
+    yellow_cats = random.randint(1, 40)
+    black_cats = random.randint(0, 15)
+    cats_list = ["🐈"] * yellow_cats + ["🐈‍⬛"] * black_cats
+    random.shuffle(cats_list)
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", bet, user['user_id'])
+
+    active_cats[chat_id] = {"count": yellow_cats, "pot": bet, "host_id": user['user_id'], "attempts": {}, "active": True}
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="❌ Отменить игру (возврат)", callback_data=f"cancel_cats_{chat_id}")
+    ]])
+
+    text = f"🐱 <b>Считай жёлтых 🐈 (чёрные 🐈‍⬛ не считаем!)</b>\nСтавка в банке: {bet}💰\n\n" + "".join(cats_list[:50]) + ("..." if len(cats_list) > 50 else "")
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("cancel_cats_"))
+async def process_cancel_cats(callback: CallbackQuery):
+    chat_id = int(callback.data.replace("cancel_cats_", ""))
+    if chat_id not in active_cats or not active_cats[chat_id]["active"]: return
+
+    game = active_cats[chat_id]
+    if callback.from_user.id != game["host_id"]:
+        await callback.answer("Отменить может только хост!", show_alert=True)
+        return
+
+    game["active"] = False
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET coins = coins + $1 WHERE user_id = $2", game["pot"], game["host_id"])
+
+    await callback.message.edit_text("❌ Игра отменена! Ставка возвращена владельцу.", parse_mode="HTML")
+
+@router.message(F.text.isdigit())
+async def process_cats_answer(message: Message):
+    chat_id = message.chat.id
+    if chat_id not in active_cats or not active_cats[chat_id]["active"]: return
+
+    game = active_cats[chat_id]
+    user_id = message.from_user.id
+    if game["attempts"].get(user_id, 0) >= 3: 
+        await message.answer("❌ У вас больше нет попыток!", parse_mode="HTML")
+        return
+
+    game["attempts"][user_id] = game["attempts"].get(user_id, 0) + 1
+    val = int(message.text)
+
+    if val == game["count"]:
+        game["active"] = False
+        win_pot = int(game["pot"] * 1.8)
+        async with db_pool.acquire() as conn:
+            await conn.execute("""UPDATE users SET coins = coins + $1, wins = wins + 1, total_games = total_games + 1,
+                cat_games = cat_games + 1, cat_wins = cat_wins + 1 WHERE user_id = $2""", win_pot, user_id)
+            await conn.execute("UPDATE users SET tournament_score = tournament_score + 1 WHERE user_id = $1", user_id)
+        
+        # Проверяем ачивки и квесты
+        await check_achievements(user_id)
+        await check_quests(user_id)
+        
+        await message.answer(f"🎉 <b>Правильно, {message.from_user.first_name}!</b> Жёлтых котиков было {val}.\n🏆 Вы забрали +{win_pot}💰!\n+1 очко в турнир!", parse_mode="HTML")
+    else:
+        remaining = 3 - game["attempts"][user_id]
+        if remaining == 0:
+            await message.answer(f"❌ Неправильно! У вас закончились попытки. Ответ: {game['count']}", parse_mode="HTML")
+            # Завершаем игру для этого пользователя
+        else:
+            await message.answer(f"❌ Неправильно! Осталось попыток: {remaining}", parse_mode="HTML")
+
+# ============================================================
+# 🎰 КАЗИНО (С КНОПКОЙ ПОДТВЕРЖДЕНИЯ)
+# ============================================================
+@router.message(F.text.lower().in_(["казино", "🎰 казино"]))
+async def cmd_casino(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if user['stars'] < 25:
+        await message.answer("❌ Для игры требуется 25⭐!", parse_mode="HTML")
+        return
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, крутить!", callback_data="casino_yes")],
+        [InlineKeyboardButton(text="❌ Нет, отмена", callback_data="casino_no")]
+    ])
+    await message.answer("🎰 <b>Платная рулетка казино!</b>\nСтоимость: 25⭐\nВы уверены, что хотите сыграть?", parse_mode="HTML", reply_markup=kb)
+
+@router.callback_query(F.data.startswith("casino_"))
+async def process_casino(callback: CallbackQuery):
+    if callback.data == "casino_no":
+        await callback.message.edit_text("❌ Отменено!", parse_mode="HTML")
+        await callback.answer("Отменено!", show_alert=True)
+        return
+    
+    user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
+    if user['stars'] < 25:
+        await callback.answer("❌ Недостаточно звёзд!", show_alert=True)
+        return
+
+    rand = random.random()
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET stars = stars - 25, casino_games = casino_games + 1 WHERE user_id = $1", user['user_id'])
+
+        if rand < 0.40:
+            win_c = random.randint(50, 3000)
+            await conn.execute("UPDATE users SET coins = coins + $1, wins = wins + 1 WHERE user_id = $2", win_c, user['user_id'])
+            res = f"💰 Вы выиграли <b>+{win_c} монет</b>!"
+        elif rand < 0.70:
+            days = random.randint(4, 10)
+            vip_until = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+            await conn.execute("UPDATE users SET is_vip = TRUE, vip_until = $1, wins = wins + 1 WHERE user_id = $2", vip_until, user['user_id'])
+            res = f"👑 Вы выиграли <b>VIP статус на {days} дней</b>!"
+        elif rand < 0.99:
+            win_s = random.randint(10, 75)
+            await conn.execute("UPDATE users SET stars = stars + $1, wins = wins + 1 WHERE user_id = $2", win_s, user['user_id'])
+            res = f"⭐ Вы выиграли <b>+{win_s} звёзд</b>!"
+        else:
+            vip_until = datetime.datetime.utcnow() + datetime.timedelta(days=30)
+            await conn.execute("UPDATE users SET coins = coins + 5000, stars = stars + 50, is_vip = TRUE, vip_until = $1, wins = wins + 1 WHERE user_id = $2", vip_until, user['user_id'])
+            res = "🔥 <b>ДЖЕКПОТ (1%)!</b> 5000💰 + 50⭐ + VIP статус на 30 дней!"
+        
+        await check_achievements(user['user_id'])
+
+    await callback.message.edit_text(f"🎰 <b>Платная рулетка (-25⭐):</b>\n\n{res}", parse_mode="HTML")
+
+# ============================================================
+# 🎁 ПРИЗ
+# ============================================================
+@router.message(F.text.lower().in_(["приз", "🎁 приз"]))
+async def cmd_prize(message: Message):
+    if message.chat.type != ChatType.PRIVATE:
+        await message.answer("⚠️ Зайди в ЛС к боту, чтобы забрать сундук!", parse_mode="HTML")
+        return
+
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    today = datetime.date.today()
+
+    if user['last_prize_date'] == today:
+        await message.answer("⏳ Вы уже забирали ежедневный приз сегодня!", parse_mode="HTML")
+        return
+
+    buttons = [[InlineKeyboardButton(text=f"📦 Сундук #{i}", callback_data=f"chest_{i}")] for i in range(1, 6)]
+    await message.answer("🎁 <b>Выберите один из 5 сундуков с ежедневной наградой:</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("chest_"))
+async def process_chest(callback: CallbackQuery):
+    user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
+    today = datetime.date.today()
+    if user['last_prize_date'] == today:
+        await callback.answer("Уже сегодня!", show_alert=True)
+        return
+
+    chosen = int(callback.data.split("_")[1])
+    rewards = []
+    for _ in range(5):
+        r = random.random()
+        if r < 0.30: rewards.append((200, 0))
+        elif r < 0.55: rewards.append((500, 0))
+        elif r < 0.75: rewards.append((800, 0))
+        elif r < 0.90: rewards.append((1000, 1))
+        else: rewards.append((1500, 5))
+
+    win_coins, win_stars = rewards[chosen - 1]
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET coins = coins + $1, stars = stars + $2, last_prize_date = $3 WHERE user_id = $4",
+                         win_coins, win_stars, today, callback.from_user.id)
+
+    text = f"🎉 <b>Вы выбрали Сундук #{chosen}:</b>\n+{win_coins}💰 +{win_stars}⭐\n\nСодержимое остальных:\n"
+    for idx, (c, s) in enumerate(rewards, 1):
+        text += f"📦 #{idx}: {c}💰 {s}⭐ {'👈 (Ваш)' if idx == chosen else ''}\n"
+
+    await callback.message.edit_text(text, parse_mode="HTML")
+
+# ============================================================
+# ⭐ ПЕРЕВОД ЗВЁЗД
+# ============================================================
+@router.message(F.text.lower().startswith(("перевод", "⭐ перевод")))
+async def cmd_transfer(message: Message):
+    args = message.text.split()
+    if len(args) < 3:
+        await message.answer("❌ Формат: <code>перевод @username 10</code>", parse_mode="HTML")
+        return
+
+    target_uname = args[1].replace("@", "")
+    try:
+        amount = int(args[2])
+    except ValueError:
+        await message.answer("❌ Сумма должна быть числом!", parse_mode="HTML")
+        return
+
+    if amount <= 0:
+        await message.answer("❌ Мин. сумма 1⭐!", parse_mode="HTML")
+        return
+
+    sender = await get_or_create_user(message.from_user.id, message.from_user.username)
+    today = datetime.date.today()
+    transferred = sender['daily_stars_transferred'] if sender['last_transfer_date'] == today else 0
+
+    if transferred + amount > 25:
+        await message.answer(f"❌ Дневной лимит переводов 25⭐! Вы уже перевели {transferred}⭐.", parse_mode="HTML")
+        return
+
+    if sender['stars'] < amount:
+        await message.answer("❌ Недостаточно звёзд!", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        target = await conn.fetchrow("SELECT * FROM users WHERE username = $1", target_uname)
+        if not target:
+            await message.answer("❌ Пользователь не найден!", parse_mode="HTML")
+            return
+
+        await conn.execute("UPDATE users SET stars = stars - $1, daily_stars_transferred = $2, last_transfer_date = $3 WHERE user_id = $4",
+                         amount, transferred + amount, today, message.from_user.id)
+        await conn.execute("UPDATE users SET stars = stars + $1 WHERE user_id = $2", amount, target['user_id'])
+
+    await message.answer(f"✅ Успешно переведено +{amount}⭐ для @{target_uname}!", parse_mode="HTML")
+
+# ============================================================
+# 🏪 МАГАЗИН
+# ============================================================
+@router.message(F.text.lower().in_(["магазин", "🏪 магазин"]))
+async def cmd_shop(message: Message):
+    text = """🏪 <b>МАГАЗИН ТОВАРОВ</b>
+
+👑 VIP 1 день — 5⭐
+👑 VIP 7 дней — 30⭐
+🛡️ Страховка — 5⭐ (возврат 50% при проигрыше)
+💱 Обмен — 1⭐ → 50💰
+✏️ Сменить ник — <code>сменить_ник @ник</code> (10⭐)
+🔒 Скрыть профиль — <code>скрыть_профиль</code> (1000⭐)
+🔓 Открыть профиль — <code>открыть_профиль</code>"""
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👑 VIP 1д (5⭐)", callback_data="buy_vip_1"),
+         InlineKeyboardButton(text="👑 VIP 7д (30⭐)", callback_data="buy_vip_7")],
+        [InlineKeyboardButton(text="🛡️ Страховка (5⭐)", callback_data="buy_ins"),
+         InlineKeyboardButton(text="💱 1⭐→50💰", callback_data="buy_ex")]
+    ])
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+@router.callback_query(F.data.startswith("buy_"))
+async def process_shop(callback: CallbackQuery):
+    user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
+    
+    async with db_pool.acquire() as conn:
+        if callback.data == "buy_vip_1" and user['stars'] >= 5:
+            vip_until = datetime.datetime.utcnow() + datetime.timedelta(days=1)
+            await conn.execute("UPDATE users SET stars = stars - 5, is_vip = TRUE, vip_until = $1 WHERE user_id = $2", vip_until, user['user_id'])
+            await callback.answer("✅ Куплен VIP на 1 день!", show_alert=True)
+        elif callback.data == "buy_vip_7" and user['stars'] >= 30:
+            vip_until = datetime.datetime.utcnow() + datetime.timedelta(days=7)
+            await conn.execute("UPDATE users SET stars = stars - 30, is_vip = TRUE, vip_until = $1 WHERE user_id = $2", vip_until, user['user_id'])
+            await callback.answer("✅ Куплен VIP на 7 дней!", show_alert=True)
+        elif callback.data == "buy_ins" and user['stars'] >= 5:
+            await conn.execute("UPDATE users SET stars = stars - 5, insurance = TRUE WHERE user_id = $1", user['user_id'])
+            await callback.answer("✅ Страховка активирована!", show_alert=True)
+        elif callback.data == "buy_ex" and user['stars'] >= 1:
+            await conn.execute("UPDATE users SET stars = stars - 1, coins = coins + 50 WHERE user_id = $1", user['user_id'])
+            await callback.answer("✅ Обменяно 1⭐ на 50💰!", show_alert=True)
+        else:
+            await callback.answer("❌ Недостаточно звёзд!", show_alert=True)
+
+# ============================================================
+# ✏️ СМЕНА НИКА И СКРЫТИЕ ПРОФИЛЯ
+# ============================================================
+@router.message(F.text.lower().startswith("сменить_ник"))
+async def cmd_change_nick(message: Message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer("❌ Формат: <code>сменить_ник @новый_ник</code>", parse_mode="HTML")
+        return
+
+    new_nick = args[1].strip()
+    if new_nick.startswith("@"): new_nick = new_nick[1:]
+
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if user['stars'] < 10:
+        await message.answer("❌ Нужна 10⭐!", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET stars = stars - 10, custom_nick = $1 WHERE user_id = $2", new_nick, message.from_user.id)
+
+    await message.answer(f"✅ Ваш кастомный ник изменён на: <b>{new_nick}</b>", parse_mode="HTML")
+
+@router.message(F.text.lower() == "скрыть_профиль")
+async def cmd_hide_profile(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if user['stars'] < 1000:
+        await message.answer("❌ Нужно 1000⭐!", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET stars = stars - 1000, is_hidden = TRUE WHERE user_id = $1", message.from_user.id)
+
+    await message.answer("🔒 Ваш профиль скрыт от других игроков!", parse_mode="HTML")
+
+@router.message(F.text.lower() == "открыть_профиль")
+async def cmd_unhide_profile(message: Message):
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET is_hidden = FALSE WHERE user_id = $1", message.from_user.id)
+    await message.answer("🔓 Ваш профиль открыт!", parse_mode="HTML")
+
+# ============================================================
+# 👤 ПРОФИЛЬ И СТАТИСТИКА
+# ============================================================
+@router.message(F.text.lower().startswith(("профиль", "п")))
+async def cmd_profile(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    rank = calculate_rank(user['wins'], user['total_games'])
+    display_name = user['custom_nick'] or user['username'] or f"Игрок_{user['user_id']}"
+
+    # Получаем семейную информацию
+    family_info = ""
+    if user['family_id']:
+        async with db_pool.acquire() as conn:
+            fam = await conn.fetchrow("SELECT name, score FROM families WHERE id = $1", user['family_id'])
+            if fam:
+                family_info = f"\n💍 Семья: {fam['name'] or f'Семья #{user['family_id']}'}\n⭐ Очки семьи: {fam['score']}"
+
+    games_data = [
+        ("🎰 Рулетка", user['roulette_wins'], user['roulette_games']),
+        ("🤠 Дуэль", user['duel_wins'], user['duel_games']),
+        ("🐱 Котики", user['cat_wins'], user['cat_games']),
+        ("🎰 Казино", user['casino_wins'], user['casino_games']),
+    ]
+
+    stats_text = ""
+    best_game = "Нет игр"
+    best_ratio = 0.0
+
+    for name, wins, total in games_data:
+        if total > 0:
+            ratio = round((wins / total) * 100, 1)
+            stats_text += f"{name}: {wins}/{total} ({ratio}%)\n"
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_game = name
+        else:
+            stats_text += f"{name}: 0/0 (0%)\n"
+
+    titles = await get_user_titles(user)
+    titles_str = ", ".join(titles) if titles else "Нет"
+    
+    # VIP статус
+    vip_status = "👑 VIP" if user['is_vip'] and (not user['vip_until'] or user['vip_until'] > datetime.datetime.utcnow()) else "Обычный"
+    if user['vip_until'] and user['vip_until'] > datetime.datetime.utcnow():
+        days_left = (user['vip_until'] - datetime.datetime.utcnow()).days
+        vip_status += f" (осталось {days_left}д)"
+
+    text = (
+        f"👤 <b>Профиль:</b> {display_name}\n"
+        f"🎖️ <b>Ранг:</b> {rank}\n"
+        f"💳 <b>Статус:</b> {vip_status}\n"
+        f"💰 <b>Монеты:</b> {user['coins']:,}\n"
+        f"⭐ <b>Звёзды:</b> {user['stars']}\n"
+        f"🎖️ <b>Титулы:</b> {titles_str}{family_info}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"📈 <b>Статистика по играм:</b>\n{stats_text}\n"
+        f"🏆 <b>Лучшая игра:</b> {best_game} ({best_ratio}%)\n"
+        f"🏟️ <b>Турнирные очки:</b> {user['tournament_score']}"
+    )
+
+    # Отправляем с аватаркой
+    avatar_url = AVATARS.get(user['gender'], None)
+    if avatar_url:
+        await bot.send_photo(message.from_user.id, avatar_url, caption=text, parse_mode="HTML")
+    else:
+        await message.answer(text, parse_mode="HTML")
+
+@router.message(F.text.lower().in_(["статистика", "стата", "📊 статистика"]))
+async def cmd_stats(message: Message):
+    u = await get_or_create_user(message.from_user.id, message.from_user.username)
+    text = f"""📊 <b>СТАТИСТИКА ИГРОКА</b>
+
+🎰 Рулетка: {u['roulette_wins']}/{u['roulette_games']} побед
+🤠 Дуэль: {u['duel_wins']}/{u['duel_games']} побед
+🐱 Котики: {u['cat_wins']}/{u['cat_games']} побед
+🎰 Казино: {u['casino_wins']}/{u['casino_games']} побед
+
+🔥 Всего игр: {u['total_games']}
+🏆 Побед: {u['wins']}
+💀 Поражений: {u['losses']}
+🏟️ Турнирные очки: {u['tournament_score']}"""
+    await message.answer(text, parse_mode="HTML")
+
+# ============================================================
+# 🏆 ТОПЫ
+# ============================================================
+@router.message(F.text.lower().in_(["топ", "🏆 топ"]))
+async def cmd_top(message: Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="💍 Топ Семей", callback_data="top_families"),
+        InlineKeyboardButton(text="🏟️ Топ Турнира", callback_data="top_tournament")
+    ]])
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id, username, custom_nick, wins, coins, is_hidden FROM users WHERE is_hidden = FALSE ORDER BY wins DESC LIMIT 10")
+
+    text = "🏆 <b>ТОП ИГРОКОВ:</b>\n\n"
+    for idx, r in enumerate(rows, start=1):
+        name = r['custom_nick'] or r['username'] or f"Игрок_{r['user_id']}"
+        text += f"{idx}. {name} — {r['wins']} побед ({r['coins']}💰)\n"
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+@router.callback_query(F.data == "top_families")
+async def cmd_top_families(callback: CallbackQuery):
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT id, name, score, created_at FROM families ORDER BY score DESC LIMIT 10")
+
+    text = "💍 <b>ТОП СЕМЕЙ:</b>\n\n"
+    for idx, r in enumerate(rows, start=1):
+        fam_name = r['name'] or f"Семья #{r['id']}"
+        text += f"{idx}. {fam_name} — {r['score']} очков (с {r['created_at']})\n"
+
+    await callback.message.edit_text(text, parse_mode="HTML")
+
+@router.callback_query(F.data == "top_tournament")
+async def cmd_top_tournament(callback: CallbackQuery):
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id, username, custom_nick, tournament_score FROM users WHERE tournament_fee_paid = TRUE AND tournament_score > 0 ORDER BY tournament_score DESC LIMIT 10")
+
+    if not rows:
+        text = "🏟️ <b>ТОП ТУРНИРА:</b>\n\nНет участников в текущем турнире!"
+    else:
+        text = "🏟️ <b>ТОП ТУРНИРА:</b>\n\n"
+        for idx, r in enumerate(rows, start=1):
+            name = r['custom_nick'] or r['username'] or f"Игрок_{r['user_id']}"
+            text += f"{idx}. {name} — {r['tournament_score']} очков\n"
+    
+    await callback.message.edit_text(text, parse_mode="HTML")
+
+# ============================================================
+# 💍 СЕМЕЙНАЯ СИСТЕМА
+# ============================================================
+@router.message(F.text.lower().startswith("обручиться"))
+async def cmd_marry(message: Message):
+    if not message.reply_to_message:
+        await message.answer("❌ Ответьте на сообщение партнера!", parse_mode="HTML")
+        return
+
+    args = message.text.split(maxsplit=1)
+    fam_name = args[1].strip() if len(args) > 1 else None
+
+    u1 = await get_or_create_user(message.from_user.id, message.from_user.username)
+    u2 = await get_or_create_user(message.reply_to_message.from_user.id, message.reply_to_message.from_user.username)
+
+    if u1['family_id'] or u2['family_id']:
+        await message.answer("❌ Один из вас уже состоит в браке!", parse_mode="HTML")
+        return
+    
+    # Проверка бана на брак
+    if u1['divorce_until'] and u1['divorce_until'] > datetime.date.today():
+        await message.answer(f"❌ Вы не можете вступать в брак до {u1['divorce_until']}!", parse_mode="HTML")
+        return
+    
+    if u2['divorce_until'] and u2['divorce_until'] > datetime.date.today():
+        await message.answer(f"❌ Ваш партнер не может вступать в брак до {u2['divorce_until']}!", parse_mode="HTML")
+        return
+
+    marriage_id = f"{u1['user_id']}_{u2['user_id']}"
+    pending_marriages[marriage_id] = {
+        "u1": u1['user_id'],
+        "u2": u2['user_id'],
+        "fam_name": fam_name or f"Семья {u1['username']} и {u2['username']}",
+        "pending": True
+    }
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="❤️ Принять", callback_data=f"marry_accept_{marriage_id}"),
+            InlineKeyboardButton(text="💔 Отклонить", callback_data=f"marry_reject_{marriage_id}")
+        ]
+    ])
+    await message.answer(f"💍 {message.reply_to_message.from_user.first_name}, вам предлагают руку и сердце!\nНазвание: {pending_marriages[marriage_id]['fam_name']}\n⏳ Таймер: 120 сек", reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("marry_"))
+async def process_marry(callback: CallbackQuery):
+    action, marriage_id = callback.data.split("_", 1)
+    
+    if marriage_id not in pending_marriages:
+        await callback.answer("Предложение устарело!", show_alert=True)
+        return
+    
+    marriage = pending_marriages[marriage_id]
+    
+    if action == "reject":
+        del pending_marriages[marriage_id]
+        await callback.message.edit_text("💔 Предложение отклонено!", parse_mode="HTML")
+        return
+    
+    if callback.from_user.id != marriage["u2"]:
+        await callback.answer("Это предложение предназначено не вам!", show_alert=True)
+        return
+    
+    # Создаем семью
+    today = datetime.date.today()
+    async with db_pool.acquire() as conn:
+        fam_id = await conn.fetchval(
+            "INSERT INTO families (user1_id, user2_id, name, created_at) VALUES ($1, $2, $3, $4) RETURNING id",
+            marriage["u1"], marriage["u2"], marriage["fam_name"], today
+        )
+        await conn.execute("UPDATE users SET family_id = $1, spouse_id = $2, stars = stars + 5 WHERE user_id IN ($3, $4)", 
+                         fam_id, marriage["u2"], marriage["u1"], marriage["u2"])
+    
+    del pending_marriages[marriage_id]
+    await callback.message.edit_text("🎉 <b>СЕМЬЯ СОЗДАНА! +5⭐ каждому супругу!</b>", parse_mode="HTML")
+    await check_achievements(marriage["u1"])
+    await check_achievements(marriage["u2"])
+
+@router.message(F.text.lower().startswith("сменить_имя_семьи"))
+async def cmd_rename_family(message: Message):
+    if not message.reply_to_message:
+        await message.answer("❌ Ответьте на сообщение партнера!", parse_mode="HTML")
+        return
+    
+    args = message.text.split(maxsplit=2)
+    if len(args) < 3:
+        await message.answer("❌ Формат: <code>сменить_имя_семьи @партнёр НовоеИмя</code>", parse_mode="HTML")
+        return
+
+    new_name = args[2].strip()
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if not user['family_id']:
+        await message.answer("❌ Вы не состоите в семье!", parse_mode="HTML")
+        return
+
+    if user['stars'] < 5:
+        await message.answer("❌ Смена имени стоит 5⭐!", parse_mode="HTML")
+        return
+
+    rename_id = f"{user['user_id']}_{user['spouse_id']}_{datetime.datetime.utcnow().timestamp()}"
+    pending_renames[rename_id] = {
+        "family_id": user['family_id'],
+        "new_name": new_name,
+        "requester": user['user_id'],
+        "partner": user['spouse_id'],
+        "pending": True
+    }
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Принять", callback_data=f"rename_accept_{rename_id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rename_reject_{rename_id}")
+        ]
+    ])
+    await message.answer(f"✏️ Партнер предлагает сменить название семьи на: <b>{new_name}</b>\nСтоимость: 5⭐", reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("rename_"))
+async def process_rename(callback: CallbackQuery):
+    action, rename_id = callback.data.split("_", 1)
+    
+    if rename_id not in pending_renames:
+        await callback.answer("Предложение устарело!", show_alert=True)
+        return
+    
+    rename = pending_renames[rename_id]
+    
+    if action == "reject":
+        del pending_renames[rename_id]
+        await callback.message.edit_text("❌ Смена имени отклонена!", parse_mode="HTML")
+        return
+    
+    if callback.from_user.id != rename["partner"]:
+        await callback.answer("Это предложение не вам!", show_alert=True)
+        return
+    
+    # Списываем звезды у инициатора
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT stars FROM users WHERE user_id = $1", rename["requester"])
+        if user['stars'] < 5:
+            await callback.answer("❌ У инициатора недостаточно звёзд!", show_alert=True)
+            return
+        
+        await conn.execute("UPDATE users SET stars = stars - 5 WHERE user_id = $1", rename["requester"])
+        await conn.execute("UPDATE families SET name = $1 WHERE id = $2", rename["new_name"], rename["family_id"])
+    
+    del pending_renames[rename_id]
+    await callback.message.edit_text(f"✅ Название семьи успешно изменено на: <b>{rename['new_name']}</b>", parse_mode="HTML")
+
+@router.message(F.text.lower() == "развод")
+async def cmd_divorce(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if not user['family_id']:
+        await message.answer("❌ Вы не состоите в браке!", parse_mode="HTML")
+        return
+    
+    # Проверка на бан
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💔 Да, развестись", callback_data="divorce_confirm")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="divorce_cancel")]
+    ])
+    await message.answer("💔 <b>Вы уверены, что хотите развестись?</b>\nПосле развода будет бан на брак 7 дней.", parse_mode="HTML", reply_markup=kb)
+
+@router.callback_query(F.data.startswith("divorce_"))
+async def process_divorce(callback: CallbackQuery):
+    if callback.data == "divorce_cancel":
+        await callback.message.edit_text("❌ Развод отменен!", parse_mode="HTML")
+        return
+    
+    user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
+    if not user['family_id']:
+        await callback.answer("Вы не состоите в браке!", show_alert=True)
+        return
+    
+    ban_date = datetime.date.today() + datetime.timedelta(days=7)
+    async with db_pool.acquire() as conn:
+        family_id = user['family_id']
+        spouse_id = user['spouse_id']
+        await conn.execute("DELETE FROM families WHERE id = $1", family_id)
+        await conn.execute("UPDATE users SET family_id = NULL, spouse_id = NULL, divorce_until = $1 WHERE user_id IN ($2, $3)",
+                         ban_date, user['user_id'], spouse_id)
+
+    await callback.message.edit_text("💔 Бракоразводный процесс завершен. Установлен бан на брак на 7 дней.", parse_mode="HTML")
+
+@router.message(F.text.lower().startswith("ребёнок"))
+async def cmd_adopt(message: Message):
+    if not message.reply_to_message:
+        await message.answer("❌ Ответьте на сообщение игрока!", parse_mode="HTML")
+        return
+
+    parent = await get_or_create_user(message.from_user.id, message.from_user.username)
+    child = await get_or_create_user(message.reply_to_message.from_user.id, message.reply_to_message.from_user.username)
+
+    if not parent['family_id']:
+        await message.answer("❌ Вы должны состоять в семье!", parse_mode="HTML")
+        return
+
+    # Проверяем, не усыновлен ли уже ребенок
+    async with db_pool.acquire() as conn:
+        existing = await conn.fetchval("SELECT child_id FROM children WHERE child_id = $1", child['user_id'])
+        if existing:
+            await message.answer("❌ Этот игрок уже усыновлен!", parse_mode="HTML")
+            return
+        
+        # Проверяем топ-1 семьи
+        family = await conn.fetchrow("SELECT top1_count FROM families WHERE id = $1", parent['family_id'])
+        if family['top1_count'] < 5:
+            await message.answer("❌ Семья должна быть в топ-1 минимум 5 раз!", parse_mode="HTML")
+            return
+        
+        await conn.execute("INSERT INTO children (family_id, child_id) VALUES ($1, $2)", parent['family_id'], child['user_id'])
+
+    await message.answer(f"👶 Игрок {message.reply_to_message.from_user.first_name} успешно усыновлён!", parse_mode="HTML")
+
+@router.message(F.text.lower() == "семья")
+async def cmd_family(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if not user['family_id']:
+        await message.answer("❌ Вы не состоите в семье!", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        fam = await conn.fetchrow("SELECT * FROM families WHERE id = $1", user['family_id'])
+        children = await conn.fetch("SELECT child_id FROM children WHERE family_id = $1", user['family_id'])
+
+    fam_name = fam['name'] or f"Семья #{fam['id']}"
+    spouse = await get_or_create_user(user['spouse_id'], None)
+    spouse_name = spouse['custom_nick'] or spouse['username'] or f"Игрок_{spouse['user_id']}"
+    
+    children_list = []
+    for c in children:
+        child_user = await get_or_create_user(c['child_id'], None)
+        children_list.append(child_user['custom_nick'] or child_user['username'] or f"Игрок_{c['child_id']}")
+    
+    children_text = "\n".join([f"👶 {c}" for c in children_list]) if children_list else "Нет детей"
+
+    text = f"""💍 <b>{fam_name}</b>
+👨‍👩‍👧‍👦 <b>Супруги:</b> {user['custom_nick'] or user['username']} & {spouse_name}
+📅 Дата создания: {fam['created_at']}
+⭐ Очки семьи: {fam['score']}
+🎖️ Побед в Топ-1: {fam['top1_count']}
+
+👶 <b>Дети:</b>
+{children_text}"""
+    await message.answer(text, parse_mode="HTML")
+
+@router.message(F.text.lower() == "годовщина")
+async def cmd_anniversary(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    if not user['family_id']:
+        await message.answer("❌ Вы не состоите в семье!", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        fam = await conn.fetchrow("SELECT created_at, last_anniversary_month FROM families WHERE id = $1", user['family_id'])
+
+    created = fam['created_at']
+    months = (datetime.date.today().year - created.year) * 12 + datetime.date.today().month - created.month
+
+    if months > fam['last_anniversary_month']:
+        reward = min(5 * months, 50)
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE families SET last_anniversary_month = $1 WHERE id = $2", months, user['family_id'])
+            await conn.execute("UPDATE users SET stars = stars + $1 WHERE user_id IN ($2, $3)", reward, user['user_id'], user['spouse_id'])
+        await message.answer(f"🎂 <b>ГОДОВЩИНА! Вместе {months} мес.! +{reward}⭐ каждому супругу!</b>", parse_mode="HTML")
+    else:
+        await message.answer(f"📅 Вы вместе {months} мес. Следующий бонус через {months - fam['last_anniversary_month']} мес.", parse_mode="HTML")
+
+# ============================================================
+# 🎯 КВЕСТЫ
+# ============================================================
+@router.message(F.text.lower().in_(["квесты", "🎯 квесты"]))
+async def cmd_quests(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username)
+    
+    quests = [
+        ("1️⃣ Сыграть 10 игр", user['total_games'] >= 10, user['quest1_done']),
+        ("2️⃣ Выиграть 5 дуэлей", user['duel_wins'] >= 5, user['quest2_done']),
+        ("3️⃣ Угадать число в рулетке", user['roulette_wins'] >= 1, user['quest3_done']),
+        ("4️⃣ Сыграть в котиков 3 раза", user['cat_games'] >= 3, user['quest4_done']),
+        ("5️⃣ Выиграть 500 монет за день", user['daily_net_win'] >= 500, user['quest5_done']),
+    ]
+    
+    text = "🎯 <b>ЕЖЕНЕДЕЛЬНЫЕ КВЕСТЫ</b>\n\n"
+    for q_name, completed, done in quests:
+        status = "✅" if done else "⏳" if completed else "❌"
+        text += f"{status} {q_name}\n"
+    
+    text += f"\n📊 Выполнено квестов: {user['quests_completed']}/5"
+    if user['quests_completed'] >= 5 and not user['quest_bonus_claimed']:
+        text += "\n🎁 БОНУС ЗА ВСЕ КВЕСТЫ ДОСТУПЕН!"
+    elif user['quest_bonus_claimed']:
+        text += "\n✅ БОНУС ЗА ВСЕ КВЕСТЫ ПОЛУЧЕН!"
+    
+    await message.answer(text, parse_mode="HTML")
+
+# ============================================================
+# 🏆 ТУРНИР
+# ============================================================
+@router.message(F.text.lower().in_(["турнир", "🏆 турнир"]))
+async def cmd_tournament(message: Message):
+    time_left = await get_tournament_time_left()
+    
+    async with db_pool.acquire() as conn:
+        participants = await conn.fetchval("SELECT COUNT(*) FROM users WHERE tournament_fee_paid = TRUE")
+        total_fee = participants * 10
+        prize_pool = 500 + total_fee
+        
+        top_participants = await conn.fetch(
+            "SELECT user_id, username, custom_nick, tournament_score FROM users WHERE tournament_fee_paid = TRUE ORDER BY tournament_score DESC LIMIT 3"
+        )
+    
+    text = f"""🏆 <b>ЕЖЕНЕДЕЛЬНЫЙ ТУРНИР</b>
+
+{time_left}
+
+👥 Участников: {participants}
+💰 Призовой фонд: {prize_pool}⭐ (500⭐ + взносы)
+
+🏅 <b>Текущий топ-3:</b>
+"""
+    
+    if top_participants:
+        for idx, p in enumerate(top_participants, 1):
+            name = p['custom_nick'] or p['username'] or f"Игрок_{p['user_id']}"
+            text += f"{idx}. {name} — {p['tournament_score']} побед\n"
+    else:
+        text += "Нет участников\n"
+    
+    text += """
+🎖️ <b>Награды:</b>
+🥇 1 место — 60% фонда
+🥈 2 место — 30% фонда
+🥉 3 место — 10% фонда
+"""
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🎟️ Участвовать (10⭐)", callback_data="join_tournament"),
+        InlineKeyboardButton(text="📊 Статистика", callback_data="tournament_stats")
+    ]])
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+@router.callback_query(F.data == "join_tournament")
+async def process_join_tournament(callback: CallbackQuery):
+    user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
+    if user['tournament_fee_paid']:
+        await callback.answer("Вы уже участвуете!", show_alert=True)
+        return
+    
+    if user['stars'] < 10:
+        await callback.answer("❌ У вас недостаточно звёзд!", show_alert=True)
+        return
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET stars = stars - 10, tournament_fee_paid = TRUE WHERE user_id = $1", user['user_id'])
+
+    await callback.answer("✅ Вы зарегистрированы в турнире!", show_alert=True)
+    await callback.message.edit_text("✅ Вы успешно зарегистрированы в турнире!\nУдачи! 🍀", parse_mode="HTML")
+
+@router.callback_query(F.data == "tournament_stats")
+async def tournament_stats(callback: CallbackQuery):
+    user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
+    
+    async with db_pool.acquire() as conn:
+        participants = await conn.fetchval("SELECT COUNT(*) FROM users WHERE tournament_fee_paid = TRUE")
+        user_rank = await conn.fetchval("""
+            SELECT COUNT(*) + 1 FROM users 
+            WHERE tournament_fee_paid = TRUE AND tournament_score > (SELECT tournament_score FROM users WHERE user_id = $1)
+        """, user['user_id'])
+    
+    text = f"""📊 <b>Ваша статистика в турнире:</b>
+
+🏟️ Ваши очки: {user['tournament_score']}
+👥 Всего участников: {participants}
+🏅 Ваше место: #{user_rank or 'Не участвуете'}
+
+🎯 Победы в турнире дают +1 очко"""
+    
+    await callback.message.edit_text(text, parse_mode="HTML")
+
+# ============================================================
+# 🎫 ПРОМОКОДЫ (АДМИН)
+# ============================================================
+@router.message(Command("create_promo"))
+async def cmd_create_promo(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    args = command.args.split() if command.args else []
+    if len(args) < 3:
+        await message.answer("Формат: /create_promo КОД ЗВЕЗДЫ МОНЕТЫ", parse_mode="HTML")
+        return
+    code, stars, coins = args[0], int(args[1]), int(args[2])
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO promos (code, stars, coins, max_uses) VALUES ($1, $2, $3, 100)
+            ON CONFLICT (code) DO UPDATE SET stars = $2, coins = $3
+        """, code, stars, coins)
+    await message.answer(f"✅ Промокод <b>{code}</b> создан! (+{stars}⭐ +{coins}💰)", parse_mode="HTML")
+
+@router.message(Command("promo"))
+async def cmd_use_promo(message: Message, command: CommandObject):
+    if not command.args: 
+        await message.answer("❌ Укажите промокод: /promo КОД", parse_mode="HTML")
+        return
+    code = command.args.strip()
+    uid = message.from_user.id
+    async with db_pool.acquire() as conn:
+        p = await conn.fetchrow("SELECT * FROM promos WHERE code = $1", code)
+        if not p:
+            await message.answer("❌ Такой промокод не существует!", parse_mode="HTML")
+            return
+        
+        used = await conn.fetchrow("SELECT * FROM user_promos WHERE user_id = $1 AND code = $2", uid, code)
+        if used:
+            await message.answer("❌ Вы уже активировали этот промокод!", parse_mode="HTML")
+            return
+        
+        await conn.execute("INSERT INTO user_promos (user_id, code) VALUES ($1, $2)", uid, code)
+        await conn.execute("UPDATE users SET stars = stars + $1, coins = coins + $2 WHERE user_id = $3", p['stars'], p['coins'], uid)
+    await message.answer(f"🎉 <b>Промокод активирован! +{p['coins']}💰 +{p['stars']}⭐!</b>", parse_mode="HTML")
+
+# ============================================================
+# 🎉 ЕЖЕДНЕВНЫЙ БОНУС (VIP, ТОПЫ И Т.Д.)
+# ============================================================
+async def daily_cron_loop():
+    while True:
+        now = datetime.datetime.utcnow()
+        next_run = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        sleep_seconds = (next_run - now).total_seconds()
+        await asyncio.sleep(sleep_seconds)
+
+        try:
+            async with db_pool.acquire() as conn:
+                # Раздача наград за ТОП игроков
+                top_users = await conn.fetch("SELECT user_id FROM users WHERE is_hidden = FALSE ORDER BY wins DESC LIMIT 3")
+                rewards_users = [(25, 100), (15, 50), (10, 25)]
+                for idx, u in enumerate(top_users):
+                    if idx < len(rewards_users):
+                        s, c = rewards_users[idx]
+                        await conn.execute("UPDATE users SET stars = stars + $1, coins = coins + $2 WHERE user_id = $3", s, c, u['user_id'])
+                        try:
+                            await bot.send_message(u['user_id'], 
+                                f"🏆 <b>ЕЖЕДНЕВНАЯ НАГРАДА!</b>\nВаше место #{idx+1} в топе!\n+{s}⭐ +{c}💰",
+                                parse_mode="HTML")
+                        except Exception:
+                            pass
+
+                # Раздача наград за ТОП семей
+                top_fams = await conn.fetch("SELECT user1_id, user2_id, id FROM families ORDER BY score DESC LIMIT 3")
+                rewards_fams = [30, 20, 10]
+                for idx, f in enumerate(top_fams):
+                    if idx < len(rewards_fams):
+                        s = rewards_fams[idx] // 2
+                        await conn.execute("UPDATE users SET stars = stars + $1 WHERE user_id IN ($2, $3)", s, f['user1_id'], f['user2_id'])
+                        
+                        # Обновляем top1_count для семьи
+                        if idx == 0:  # Топ-1
+                            await conn.execute("UPDATE families SET top1_count = top1_count + 1 WHERE id = $1", f['id'])
+
+                # Сброс дневных лимитов
+                await conn.execute("UPDATE users SET daily_stars_transferred = 0, daily_net_win = 0")
+                
+                # Проверка VIP статуса
+                await conn.execute("UPDATE users SET is_vip = FALSE WHERE vip_until < NOW() AND vip_until IS NOT NULL")
+
+                # Завершаем турнир если воскресенье
+                if datetime.datetime.utcnow().weekday() == 6:  # Воскресенье
+                    await finish_tournament()
+                    await reset_quests()
+                    
+                    # Уведомление в чат
+                    try:
+                        if CHAT_ID:
+                            await bot.send_message(CHAT_ID, "🏆 <b>НОВАЯ НЕДЕЛЯ!</b>\nТурнир завершен, квесты сброшены!", parse_mode="HTML")
+                    except Exception:
+                        pass
+
+        except Exception as e:
+            logging.error(f"Ошибка в daily_cron_loop: {e}")
+
+# ---------------------------------------------------------
+# ЗАПУСК И ИНИЦИАЛИЗАЦИЯ
+# ---------------------------------------------------------
+async def main():
+    await init_db()
+    await start_web_server()
+    asyncio.create_task(daily_cron_loop())
+    print("🤖 БОТ ПОЛНОСТЬЮ ГОТОВ К РАБОТЕ!")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
