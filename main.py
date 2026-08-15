@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher, Router, F
 from aiogram.enums import ChatType
 from aiogram.types import (
     Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton,
-    InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+    InlineKeyboardMarkup, InlineKeyboardButton
 )
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -201,24 +201,38 @@ async def get_or_create_user(user_id: int, username: Optional[str]) -> dict:
 # РАНГИ И ТИТУЛЫ
 # ---------------------------------------------------------
 def calculate_rank(wins: int, total: int) -> str:
-    if total < 10: return "🆕 Новобранец"
+    if total < 10:
+        return "🆕 Новобранец"
     winrate = (wins / total) * 100
-    if winrate <= 20: return "🥚 Новичок"
-    elif winrate <= 40: return "🪶 Любитель"
-    elif winrate <= 55: return "⚔️ Боец"
-    elif winrate <= 70: return "🛡️ Ветеран"
-    elif winrate <= 85: return "🏅 Мастер"
-    elif winrate <= 95: return "👑 Легенда"
-    else: return "🌟 Бог игры"
+    if winrate <= 20:
+        return "🥚 Новичок"
+    elif winrate <= 40:
+        return "🪶 Любитель"
+    elif winrate <= 55:
+        return "⚔️ Боец"
+    elif winrate <= 70:
+        return "🛡️ Ветеран"
+    elif winrate <= 85:
+        return "🏅 Мастер"
+    elif winrate <= 95:
+        return "👑 Легенда"
+    else:
+        return "🌟 Бог игры"
 
 async def get_user_titles(user: dict) -> list:
     titles = []
-    if user['roulette_games'] >= 100: titles.append("🃏 Картёжник")
-    if user['duel_wins'] >= 100: titles.append("🤠 Шериф")
-    if user['cat_games'] >= 100: titles.append("🐱 Котолюб")
-    if user['coins'] >= 50000: titles.append("💰 Миллионер")
-    if user['stars'] >= 200: titles.append("⭐ Коллекционер")
-    if user['casino_wins'] >= 50: titles.append("🎰 Казино-король")
+    if user['roulette_games'] >= 100:
+        titles.append("🃏 Картёжник")
+    if user['duel_wins'] >= 100:
+        titles.append("🤠 Шериф")
+    if user['cat_games'] >= 100:
+        titles.append("🐱 Котолюб")
+    if user['coins'] >= 50000:
+        titles.append("💰 Миллионер")
+    if user['stars'] >= 200:
+        titles.append("⭐ Коллекционер")
+    if user['casino_wins'] >= 50:
+        titles.append("🎰 Казино-король")
 
     if user['family_id']:
         async with db_pool.acquire() as conn:
@@ -234,7 +248,8 @@ async def get_user_titles(user: dict) -> list:
 async def check_achievements(user_id: int):
     async with db_pool.acquire() as conn:
         u = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
-        if not u: return
+        if not u:
+            return
 
         rows = await conn.fetch("SELECT ach_id FROM achievements WHERE user_id = $1", user_id)
         unlocked = {r['ach_id'] for r in rows}
@@ -269,7 +284,8 @@ async def check_achievements(user_id: int):
 async def check_quests(user_id: int):
     async with db_pool.acquire() as conn:
         u = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
-        if not u: return
+        if not u:
+            return
 
         # Квест 1: Сыграть 10 игр
         if u['total_games'] >= 10 and not u['quest1_done']:
@@ -315,7 +331,6 @@ async def reset_quests():
 # ---------------------------------------------------------
 async def get_tournament_time_left() -> str:
     now = datetime.datetime.utcnow()
-    # Воскресенье 23:59
     days_until_sunday = (6 - now.weekday()) % 7
     if days_until_sunday == 0 and now.hour >= 23 and now.minute >= 59:
         return "⏳ Турнир завершается СЕЙЧАС!"
@@ -327,18 +342,17 @@ async def get_tournament_time_left() -> str:
 
 async def finish_tournament():
     async with db_pool.acquire() as conn:
-        # Получаем топ-3 участников
         participants = await conn.fetch("""
             SELECT user_id, tournament_score FROM users 
             WHERE tournament_fee_paid = TRUE AND tournament_score > 0
             ORDER BY tournament_score DESC LIMIT 3
         """)
         
-        if not participants: return
+        if not participants:
+            return
         
-        # Считаем призовой фонд
         total_fee = await conn.fetchval("SELECT COUNT(*) * 10 FROM users WHERE tournament_fee_paid = TRUE")
-        prize_pool = 500 + total_fee
+        prize_pool = 500 + total_fee if total_fee else 500
         
         prizes = [int(prize_pool * 0.6), int(prize_pool * 0.3), int(prize_pool * 0.1)]
         
@@ -347,7 +361,6 @@ async def finish_tournament():
             await conn.execute("UPDATE users SET stars = stars + $1, tournament_fee_paid = FALSE, tournament_score = 0 WHERE user_id = $2", 
                              stars_earned, p['user_id'])
             
-            # Отправляем уведомление
             try:
                 await bot.send_message(p['user_id'], 
                     f"🏆 <b>ТУРНИР ЗАВЕРШЕН!</b>\n"
@@ -358,7 +371,6 @@ async def finish_tournament():
             except Exception:
                 pass
         
-        # Сбрасываем всем остальным участникам
         await conn.execute("UPDATE users SET tournament_fee_paid = FALSE, tournament_score = 0 WHERE tournament_fee_paid = TRUE")
 
 # ---------------------------------------------------------
@@ -424,7 +436,6 @@ async def process_gender(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET gender = $1 WHERE user_id = $2", gender, callback.from_user.id)
     
-    # Отправляем аватарку
     await bot.send_photo(
         callback.from_user.id,
         avatar_url,
@@ -442,9 +453,9 @@ async def cmd_help(message: Message):
     await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=reply_markup)
 
 # ============================================================
-# 🎰 РУЛЕТКА (С КНОПКОЙ ОТМЕНЫ)
+# 🎰 РУЛЕТКА
 # ============================================================
-@router.message(F.text.lower().startswith(("рулетка", "р", "🎰 рулетка")))
+@router.message(F.text.lower().startswith(("рулетка", "р ", "🎰 рулетка")))
 async def cmd_roulette(message: Message):
     chat_id = message.chat.id
     args = message.text.split()
@@ -489,6 +500,7 @@ async def cmd_roulette(message: Message):
         return
 
     uname = user['custom_nick'] or user['username'] or f"Игрок_{user['user_id']}"
+    bet_idx = len(roul["bets"])
     roul["bets"].append({
         "user_id": user['user_id'],
         "username": uname,
@@ -497,9 +509,8 @@ async def cmd_roulette(message: Message):
         "insurance": user['insurance']
     })
 
-    # Кнопка отмены
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="❌ Отменить ставку", callback_data=f"cancel_roulette_{chat_id}_{len(roul['bets'])-1}")
+        InlineKeyboardButton(text="❌ Отменить ставку", callback_data=f"cancel_roulette_{chat_id}_{bet_idx}")
     ]])
     
     await message.answer(
@@ -510,9 +521,13 @@ async def cmd_roulette(message: Message):
 
 @router.callback_query(F.data.startswith("cancel_roulette_"))
 async def cancel_roulette_bet(callback: CallbackQuery):
-    _, _, chat_id_str, bet_idx = callback.data.split("_")
-    chat_id = int(chat_id_str)
-    bet_idx = int(bet_idx)
+    parts = callback.data.split("_")
+    if len(parts) < 4:
+        await callback.answer("Ошибка!", show_alert=True)
+        return
+    
+    chat_id = int(parts[2])
+    bet_idx = int(parts[3])
     
     if chat_id not in active_roulettes:
         await callback.answer("Ставка уже обработана!", show_alert=True)
@@ -528,18 +543,17 @@ async def cancel_roulette_bet(callback: CallbackQuery):
         await callback.answer("Это не ваша ставка!", show_alert=True)
         return
     
-    # Возвращаем монеты
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET coins = coins + $1 WHERE user_id = $2", bet["amount"], callback.from_user.id)
     
-    # Удаляем ставку
     roul["bets"].pop(bet_idx)
     await callback.message.edit_text(f"❌ Ставка отменена! Возвращено {bet['amount']}💰", parse_mode="HTML")
     await callback.answer("Ставка отменена!", show_alert=True)
 
 async def run_roulette_timer(chat_id: int):
     await asyncio.sleep(60)
-    if chat_id not in active_roulettes: return
+    if chat_id not in active_roulettes:
+        return
 
     roul = active_roulettes.pop(chat_id)
     bets = roul["bets"]
@@ -560,12 +574,18 @@ async def run_roulette_timer(chat_id: int):
             uid, uname, b_type, amount = b["user_id"], b["username"], b["type"], b["amount"]
             won, mult = False, 0
 
-            if b_type in ["красное", "red"] and is_red: won, mult = True, 2
-            elif b_type in ["черное", "чёрное", "black"] and (not is_red and not is_zero): won, mult = True, 2
-            elif b_type in ["чет", "чёт", "even"] and is_even: won, mult = True, 2
-            elif b_type in ["нечет", "нечёт", "odd"] and (not is_even and not is_zero): won, mult = True, 2
-            elif b_type == "0" and is_zero: won, mult = True, 100
-            elif b_type.isdigit() and int(b_type) == winning_number: won, mult = True, 50
+            if b_type in ["красное", "red"] and is_red:
+                won, mult = True, 2
+            elif b_type in ["черное", "чёрное", "black"] and (not is_red and not is_zero):
+                won, mult = True, 2
+            elif b_type in ["чет", "чёт", "even"] and is_even:
+                won, mult = True, 2
+            elif b_type in ["нечет", "нечёт", "odd"] and (not is_even and not is_zero):
+                won, mult = True, 2
+            elif b_type == "0" and is_zero:
+                won, mult = True, 100
+            elif b_type.isdigit() and int(b_type) == winning_number:
+                won, mult = True, 50
 
             if won:
                 win_coins = amount * mult
@@ -581,14 +601,13 @@ async def run_roulette_timer(chat_id: int):
                 await conn.execute("UPDATE users SET losses = losses + 1, total_games = total_games + 1, roulette_games = roulette_games + 1 WHERE user_id = $1", uid)
                 res_text += f"❌ {uname}: -{amount}💰 {'(страховка)' if refund else ''}\n"
             
-            # Проверяем ачивки и квесты
             await check_achievements(uid)
             await check_quests(uid)
 
     await bot.send_message(chat_id, res_text, parse_mode="HTML")
 
 # ============================================================
-# 🤠 ДУЭЛЬ (С КНОПКОЙ ОТМЕНЫ)
+# 🤠 ДУЭЛЬ
 # ============================================================
 @router.message(F.text.lower().startswith(("дуэль", "🤠 дуэль")))
 async def cmd_duel(message: Message):
@@ -640,14 +659,15 @@ async def cmd_duel(message: Message):
 @router.callback_query(F.data.startswith("cancel_duel_"))
 async def cancel_duel(callback: CallbackQuery):
     duel_id = callback.data.replace("cancel_duel_", "")
-    if duel_id not in active_duels: return
+    if duel_id not in active_duels:
+        await callback.answer("Дуэль уже завершена!", show_alert=True)
+        return
     
     duel = active_duels[duel_id]
     if callback.from_user.id != duel["created_by"]:
         await callback.answer("Отменить может только создатель!", show_alert=True)
         return
     
-    # Возвращаем монеты создателю
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET coins = coins + $1 WHERE user_id = $2", duel["amount"], duel["p1"])
     
@@ -658,7 +678,7 @@ async def cancel_duel(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("accept_duel_"))
 async def process_accept_duel(callback: CallbackQuery):
     duel_id = callback.data.replace("accept_duel_", "")
-    if duel_id not in active_duels: 
+    if duel_id not in active_duels:
         await callback.answer("Дуэль уже завершена!", show_alert=True)
         return
 
@@ -677,7 +697,6 @@ async def process_accept_duel(callback: CallbackQuery):
         await callback.answer("У вас недостаточно монет!", show_alert=True)
         return
 
-    # Списываем монеты у второго игрока
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET coins = coins - $1 WHERE user_id = $2", duel["amount"], p2_id)
 
@@ -700,7 +719,9 @@ async def process_accept_duel(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("shoot_"))
 async def process_shoot(callback: CallbackQuery):
     duel_id = callback.data.replace("shoot_", "")
-    if duel_id not in active_duels: return
+    if duel_id not in active_duels:
+        await callback.answer("Дуэль уже завершена!", show_alert=True)
+        return
 
     duel = active_duels[duel_id]
     if duel["pending"]:
@@ -733,10 +754,8 @@ async def process_shoot(callback: CallbackQuery):
         async with db_pool.acquire() as conn:
             await conn.execute("UPDATE users SET coins = coins - $1, losses = losses + 1, duel_games = duel_games + 1 WHERE user_id = $2", duel["amount"], loser_id)
             await conn.execute("UPDATE users SET coins = coins + $1, wins = wins + 1, duel_games = duel_games + 1, duel_wins = duel_wins + 1 WHERE user_id = $2", win_amt - duel["amount"], winner_id)
-            # Обновляем турнирные очки
             await conn.execute("UPDATE users SET tournament_score = tournament_score + 1 WHERE user_id = $1", winner_id)
 
-        # Проверяем ачивки и квесты
         await check_achievements(winner_id)
         await check_achievements(loser_id)
         await check_quests(winner_id)
@@ -801,7 +820,9 @@ async def cmd_cats(message: Message):
 @router.callback_query(F.data.startswith("cancel_cats_"))
 async def process_cancel_cats(callback: CallbackQuery):
     chat_id = int(callback.data.replace("cancel_cats_", ""))
-    if chat_id not in active_cats or not active_cats[chat_id]["active"]: return
+    if chat_id not in active_cats or not active_cats[chat_id]["active"]:
+        await callback.answer("Игра уже завершена!", show_alert=True)
+        return
 
     game = active_cats[chat_id]
     if callback.from_user.id != game["host_id"]:
@@ -817,11 +838,12 @@ async def process_cancel_cats(callback: CallbackQuery):
 @router.message(F.text.isdigit())
 async def process_cats_answer(message: Message):
     chat_id = message.chat.id
-    if chat_id not in active_cats or not active_cats[chat_id]["active"]: return
+    if chat_id not in active_cats or not active_cats[chat_id]["active"]:
+        return
 
     game = active_cats[chat_id]
     user_id = message.from_user.id
-    if game["attempts"].get(user_id, 0) >= 3: 
+    if game["attempts"].get(user_id, 0) >= 3:
         await message.answer("❌ У вас больше нет попыток!", parse_mode="HTML")
         return
 
@@ -836,7 +858,6 @@ async def process_cats_answer(message: Message):
                 cat_games = cat_games + 1, cat_wins = cat_wins + 1 WHERE user_id = $2""", win_pot, user_id)
             await conn.execute("UPDATE users SET tournament_score = tournament_score + 1 WHERE user_id = $1", user_id)
         
-        # Проверяем ачивки и квесты
         await check_achievements(user_id)
         await check_quests(user_id)
         
@@ -845,12 +866,11 @@ async def process_cats_answer(message: Message):
         remaining = 3 - game["attempts"][user_id]
         if remaining == 0:
             await message.answer(f"❌ Неправильно! У вас закончились попытки. Ответ: {game['count']}", parse_mode="HTML")
-            # Завершаем игру для этого пользователя
         else:
             await message.answer(f"❌ Неправильно! Осталось попыток: {remaining}", parse_mode="HTML")
 
 # ============================================================
-# 🎰 КАЗИНО (С КНОПКОЙ ПОДТВЕРЖДЕНИЯ)
+# 🎰 КАЗИНО
 # ============================================================
 @router.message(F.text.lower().in_(["казино", "🎰 казино"]))
 async def cmd_casino(message: Message):
@@ -934,11 +954,16 @@ async def process_chest(callback: CallbackQuery):
     rewards = []
     for _ in range(5):
         r = random.random()
-        if r < 0.30: rewards.append((200, 0))
-        elif r < 0.55: rewards.append((500, 0))
-        elif r < 0.75: rewards.append((800, 0))
-        elif r < 0.90: rewards.append((1000, 1))
-        else: rewards.append((1500, 5))
+        if r < 0.30:
+            rewards.append((200, 0))
+        elif r < 0.55:
+            rewards.append((500, 0))
+        elif r < 0.75:
+            rewards.append((800, 0))
+        elif r < 0.90:
+            rewards.append((1000, 1))
+        else:
+            rewards.append((1500, 5))
 
     win_coins, win_stars = rewards[chosen - 1]
 
@@ -1052,7 +1077,8 @@ async def cmd_change_nick(message: Message):
         return
 
     new_nick = args[1].strip()
-    if new_nick.startswith("@"): new_nick = new_nick[1:]
+    if new_nick.startswith("@"):
+        new_nick = new_nick[1:]
 
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     if user['stars'] < 10:
@@ -1085,19 +1111,20 @@ async def cmd_unhide_profile(message: Message):
 # ============================================================
 # 👤 ПРОФИЛЬ И СТАТИСТИКА
 # ============================================================
-@router.message(F.text.lower().startswith(("профиль", "п")))
+@router.message(F.text.lower().startswith(("профиль", "п ")))
 async def cmd_profile(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     rank = calculate_rank(user['wins'], user['total_games'])
     display_name = user['custom_nick'] or user['username'] or f"Игрок_{user['user_id']}"
 
-    # Получаем семейную информацию
     family_info = ""
     if user['family_id']:
         async with db_pool.acquire() as conn:
             fam = await conn.fetchrow("SELECT name, score FROM families WHERE id = $1", user['family_id'])
             if fam:
-                family_info = f"\n💍 Семья: {fam['name'] or f'Семья #{user['family_id']}'}\n⭐ Очки семьи: {fam['score']}"
+                fname = fam['name'] if fam['name'] else f"Семья #{user['family_id']}"
+                fscore = fam['score']
+                family_info = f"\n💍 <b>Семья:</b> {fname} (Очки: {fscore})"
 
     games_data = [
         ("🎰 Рулетка", user['roulette_wins'], user['roulette_games']),
@@ -1123,7 +1150,6 @@ async def cmd_profile(message: Message):
     titles = await get_user_titles(user)
     titles_str = ", ".join(titles) if titles else "Нет"
     
-    # VIP статус
     vip_status = "👑 VIP" if user['is_vip'] and (not user['vip_until'] or user['vip_until'] > datetime.datetime.utcnow()) else "Обычный"
     if user['vip_until'] and user['vip_until'] > datetime.datetime.utcnow():
         days_left = (user['vip_until'] - datetime.datetime.utcnow()).days
@@ -1142,10 +1168,12 @@ async def cmd_profile(message: Message):
         f"🏟️ <b>Турнирные очки:</b> {user['tournament_score']}"
     )
 
-    # Отправляем с аватаркой
     avatar_url = AVATARS.get(user['gender'], None)
     if avatar_url:
-        await bot.send_photo(message.from_user.id, avatar_url, caption=text, parse_mode="HTML")
+        try:
+            await bot.send_photo(message.from_user.id, avatar_url, caption=text, parse_mode="HTML")
+        except Exception:
+            await message.answer(text, parse_mode="HTML")
     else:
         await message.answer(text, parse_mode="HTML")
 
@@ -1229,7 +1257,6 @@ async def cmd_marry(message: Message):
         await message.answer("❌ Один из вас уже состоит в браке!", parse_mode="HTML")
         return
     
-    # Проверка бана на брак
     if u1['divorce_until'] and u1['divorce_until'] > datetime.date.today():
         await message.answer(f"❌ Вы не можете вступать в брак до {u1['divorce_until']}!", parse_mode="HTML")
         return
@@ -1256,7 +1283,13 @@ async def cmd_marry(message: Message):
 
 @router.callback_query(F.data.startswith("marry_"))
 async def process_marry(callback: CallbackQuery):
-    action, marriage_id = callback.data.split("_", 1)
+    parts = callback.data.split("_")
+    if len(parts) < 3:
+        await callback.answer("Ошибка!", show_alert=True)
+        return
+    
+    action = parts[1]
+    marriage_id = parts[2]
     
     if marriage_id not in pending_marriages:
         await callback.answer("Предложение устарело!", show_alert=True)
@@ -1273,7 +1306,6 @@ async def process_marry(callback: CallbackQuery):
         await callback.answer("Это предложение предназначено не вам!", show_alert=True)
         return
     
-    # Создаем семью
     today = datetime.date.today()
     async with db_pool.acquire() as conn:
         fam_id = await conn.fetchval(
@@ -1309,7 +1341,7 @@ async def cmd_rename_family(message: Message):
         await message.answer("❌ Смена имени стоит 5⭐!", parse_mode="HTML")
         return
 
-    rename_id = f"{user['user_id']}_{user['spouse_id']}_{datetime.datetime.utcnow().timestamp()}"
+    rename_id = f"{user['user_id']}_{user['spouse_id']}_{int(datetime.datetime.utcnow().timestamp())}"
     pending_renames[rename_id] = {
         "family_id": user['family_id'],
         "new_name": new_name,
@@ -1328,7 +1360,13 @@ async def cmd_rename_family(message: Message):
 
 @router.callback_query(F.data.startswith("rename_"))
 async def process_rename(callback: CallbackQuery):
-    action, rename_id = callback.data.split("_", 1)
+    parts = callback.data.split("_")
+    if len(parts) < 3:
+        await callback.answer("Ошибка!", show_alert=True)
+        return
+    
+    action = parts[1]
+    rename_id = parts[2]
     
     if rename_id not in pending_renames:
         await callback.answer("Предложение устарело!", show_alert=True)
@@ -1345,7 +1383,6 @@ async def process_rename(callback: CallbackQuery):
         await callback.answer("Это предложение не вам!", show_alert=True)
         return
     
-    # Списываем звезды у инициатора
     async with db_pool.acquire() as conn:
         user = await conn.fetchrow("SELECT stars FROM users WHERE user_id = $1", rename["requester"])
         if user['stars'] < 5:
@@ -1365,7 +1402,6 @@ async def cmd_divorce(message: Message):
         await message.answer("❌ Вы не состоите в браке!", parse_mode="HTML")
         return
     
-    # Проверка на бан
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💔 Да, развестись", callback_data="divorce_confirm")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="divorce_cancel")]
@@ -1406,14 +1442,12 @@ async def cmd_adopt(message: Message):
         await message.answer("❌ Вы должны состоять в семье!", parse_mode="HTML")
         return
 
-    # Проверяем, не усыновлен ли уже ребенок
     async with db_pool.acquire() as conn:
         existing = await conn.fetchval("SELECT child_id FROM children WHERE child_id = $1", child['user_id'])
         if existing:
             await message.answer("❌ Этот игрок уже усыновлен!", parse_mode="HTML")
             return
         
-        # Проверяем топ-1 семьи
         family = await conn.fetchrow("SELECT top1_count FROM families WHERE id = $1", parent['family_id'])
         if family['top1_count'] < 5:
             await message.answer("❌ Семья должна быть в топ-1 минимум 5 раз!", parse_mode="HTML")
@@ -1594,11 +1628,19 @@ async def tournament_stats(callback: CallbackQuery):
 # ============================================================
 @router.message(Command("create_promo"))
 async def cmd_create_promo(message: Message, command: CommandObject):
-    if message.from_user.id != ADMIN_ID: return
-    args = command.args.split() if command.args else []
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У вас нет прав!", parse_mode="HTML")
+        return
+    
+    if not command.args:
+        await message.answer("Формат: /create_promo КОД ЗВЕЗДЫ МОНЕТЫ", parse_mode="HTML")
+        return
+    
+    args = command.args.split()
     if len(args) < 3:
         await message.answer("Формат: /create_promo КОД ЗВЕЗДЫ МОНЕТЫ", parse_mode="HTML")
         return
+    
     code, stars, coins = args[0], int(args[1]), int(args[2])
     async with db_pool.acquire() as conn:
         await conn.execute("""
@@ -1609,9 +1651,10 @@ async def cmd_create_promo(message: Message, command: CommandObject):
 
 @router.message(Command("promo"))
 async def cmd_use_promo(message: Message, command: CommandObject):
-    if not command.args: 
+    if not command.args:
         await message.answer("❌ Укажите промокод: /promo КОД", parse_mode="HTML")
         return
+    
     code = command.args.strip()
     uid = message.from_user.id
     async with db_pool.acquire() as conn:
@@ -1641,7 +1684,6 @@ async def daily_cron_loop():
 
         try:
             async with db_pool.acquire() as conn:
-                # Раздача наград за ТОП игроков
                 top_users = await conn.fetch("SELECT user_id FROM users WHERE is_hidden = FALSE ORDER BY wins DESC LIMIT 3")
                 rewards_users = [(25, 100), (15, 50), (10, 25)]
                 for idx, u in enumerate(top_users):
@@ -1655,7 +1697,6 @@ async def daily_cron_loop():
                         except Exception:
                             pass
 
-                # Раздача наград за ТОП семей
                 top_fams = await conn.fetch("SELECT user1_id, user2_id, id FROM families ORDER BY score DESC LIMIT 3")
                 rewards_fams = [30, 20, 10]
                 for idx, f in enumerate(top_fams):
@@ -1663,22 +1704,16 @@ async def daily_cron_loop():
                         s = rewards_fams[idx] // 2
                         await conn.execute("UPDATE users SET stars = stars + $1 WHERE user_id IN ($2, $3)", s, f['user1_id'], f['user2_id'])
                         
-                        # Обновляем top1_count для семьи
-                        if idx == 0:  # Топ-1
+                        if idx == 0:
                             await conn.execute("UPDATE families SET top1_count = top1_count + 1 WHERE id = $1", f['id'])
 
-                # Сброс дневных лимитов
                 await conn.execute("UPDATE users SET daily_stars_transferred = 0, daily_net_win = 0")
-                
-                # Проверка VIP статуса
                 await conn.execute("UPDATE users SET is_vip = FALSE WHERE vip_until < NOW() AND vip_until IS NOT NULL")
 
-                # Завершаем турнир если воскресенье
-                if datetime.datetime.utcnow().weekday() == 6:  # Воскресенье
+                if datetime.datetime.utcnow().weekday() == 6:
                     await finish_tournament()
                     await reset_quests()
                     
-                    # Уведомление в чат
                     try:
                         if CHAT_ID:
                             await bot.send_message(CHAT_ID, "🏆 <b>НОВАЯ НЕДЕЛЯ!</b>\nТурнир завершен, квесты сброшены!", parse_mode="HTML")
@@ -1688,9 +1723,9 @@ async def daily_cron_loop():
         except Exception as e:
             logging.error(f"Ошибка в daily_cron_loop: {e}")
 
-# ---------------------------------------------------------
+# ============================================================
 # ЗАПУСК И ИНИЦИАЛИЗАЦИЯ
-# ---------------------------------------------------------
+# ============================================================
 async def main():
     await init_db()
     await start_web_server()
