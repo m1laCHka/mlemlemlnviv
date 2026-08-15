@@ -84,6 +84,7 @@ async def init_db():
     db_pool = await asyncpg.create_pool(clean_url, ssl="require")
 
     async with db_pool.acquire() as conn:
+        # Создаем таблицы с правильными типами
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
@@ -180,6 +181,27 @@ async def init_db():
             wins INT DEFAULT 0
         );
         """)
+
+        # ✅ КОНВЕРТАЦИЯ ТИПОВ ДЛЯ СУЩЕСТВУЮЩИХ ДАННЫХ
+        boolean_fields = [
+            'is_hidden', 'is_vip', 'insurance',
+            'quest1_done', 'quest2_done', 'quest3_done',
+            'quest4_done', 'quest5_done', 'quest_bonus_claimed',
+            'tournament_fee_paid'
+        ]
+        
+        for field in boolean_fields:
+            try:
+                await conn.execute(f"""
+                    ALTER TABLE users 
+                    ALTER COLUMN {field} TYPE BOOLEAN 
+                    USING {field}::BOOLEAN
+                """)
+                logging.info(f"✅ Колонка {field} сконвертирована в BOOLEAN")
+            except Exception as e:
+                logging.info(f"Конвертация {field} не требуется: {e}")
+
+        logging.info("✅ База данных инициализирована!")
 
 async def get_or_create_user(user_id: int, username: Optional[str]) -> dict:
     async with db_pool.acquire() as conn:
@@ -352,7 +374,7 @@ async def finish_tournament():
             return
         
         total_fee = await conn.fetchval("SELECT COUNT(*) * 10 FROM users WHERE tournament_fee_paid = TRUE")
-        prize_pool = 500 + total_fee if total_fee else 500
+        prize_pool = 500 + (total_fee if total_fee else 0)
         
         prizes = [int(prize_pool * 0.6), int(prize_pool * 0.3), int(prize_pool * 0.1)]
         
@@ -814,7 +836,8 @@ async def cmd_cats(message: Message):
         InlineKeyboardButton(text="❌ Отменить игру (возврат)", callback_data=f"cancel_cats_{chat_id}")
     ]])
 
-    text = f"🐱 <b>Считай жёлтых 🐈 (чёрные 🐈‍⬛ не считаем!)</b>\nСтавка в банке: {bet}💰\n\n" + "".join(cats_list[:50]) + ("..." if len(cats_list) > 50 else "")
+    cats_display = "".join(cats_list[:50]) + ("..." if len(cats_list) > 50 else "")
+    text = f"🐱 <b>Считай жёлтых 🐈 (чёрные 🐈‍⬛ не считаем!)</b>\nСтавка в банке: {bet}💰\n\n{cats_display}"
     await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("cancel_cats_"))
@@ -1194,7 +1217,7 @@ async def cmd_stats(message: Message):
     await message.answer(text, parse_mode="HTML")
 
 # ============================================================
-# 🏆 ТОПЫ
+# 🏆 ТОПЫ (ИСПРАВЛЕНА ОШИБКА С ТИПАМИ)
 # ============================================================
 @router.message(F.text.lower().in_(["топ", "🏆 топ"]))
 async def cmd_top(message: Message):
@@ -1203,12 +1226,23 @@ async def cmd_top(message: Message):
         InlineKeyboardButton(text="🏟️ Топ Турнира", callback_data="top_tournament")
     ]])
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id, username, custom_nick, wins, coins, is_hidden FROM users WHERE is_hidden = FALSE ORDER BY wins DESC LIMIT 10")
+        # ✅ БЕЗОПАСНЫЙ ЗАПРОС - работает с BOOLEAN и INT
+        rows = await conn.fetch("""
+            SELECT user_id, username, custom_nick, wins, coins 
+            FROM users 
+            WHERE (is_hidden IS NULL OR is_hidden = false)
+            ORDER BY wins DESC 
+            LIMIT 10
+        """)
 
-    text = "🏆 <b>ТОП ИГРОКОВ:</b>\n\n"
-    for idx, r in enumerate(rows, start=1):
-        name = r['custom_nick'] or r['username'] or f"Игрок_{r['user_id']}"
-        text += f"{idx}. {name} — {r['wins']} побед ({r['coins']}💰)\n"
+    if not rows:
+        text = "🏆 <b>ТОП ИГРОКОВ:</b>\n\nНет игроков для отображения"
+    else:
+        text = "🏆 <b>ТОП ИГРОКОВ:</b>\n\n"
+        for idx, r in enumerate(rows, start=1):
+            name = r['custom_nick'] or r['username'] or f"Игрок_{r['user_id']}"
+            text += f"{idx}. {name} — {r['wins']} побед ({r['coins']}💰)\n"
+    
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 @router.callback_query(F.data == "top_families")
@@ -1226,7 +1260,13 @@ async def cmd_top_families(callback: CallbackQuery):
 @router.callback_query(F.data == "top_tournament")
 async def cmd_top_tournament(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id, username, custom_nick, tournament_score FROM users WHERE tournament_fee_paid = TRUE AND tournament_score > 0 ORDER BY tournament_score DESC LIMIT 10")
+        rows = await conn.fetch("""
+            SELECT user_id, username, custom_nick, tournament_score 
+            FROM users 
+            WHERE tournament_fee_paid = TRUE AND tournament_score > 0 
+            ORDER BY tournament_score DESC 
+            LIMIT 10
+        """)
 
     if not rows:
         text = "🏟️ <b>ТОП ТУРНИРА:</b>\n\nНет участников в текущем турнире!"
@@ -1673,6 +1713,32 @@ async def cmd_use_promo(message: Message, command: CommandObject):
     await message.answer(f"🎉 <b>Промокод активирован! +{p['coins']}💰 +{p['stars']}⭐!</b>", parse_mode="HTML")
 
 # ============================================================
+# 🔍 ДИАГНОСТИКА (АДМИН)
+# ============================================================
+@router.message(Command("check_db"))
+async def cmd_check_db(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У вас нет прав!", parse_mode="HTML")
+        return
+    
+    async with db_pool.acquire() as conn:
+        columns = await conn.fetch("""
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'users' 
+            AND column_name IN ('is_hidden', 'is_vip', 'insurance', 'quest1_done')
+        """)
+        
+        text = "📊 <b>Типы колонок в БД:</b>\n\n"
+        for col in columns:
+            text += f"📌 {col['column_name']}: {col['data_type']}\n"
+        
+        count = await conn.fetchval("SELECT COUNT(*) FROM users")
+        text += f"\n👥 Всего пользователей: {count}"
+        
+        await message.answer(text, parse_mode="HTML")
+
+# ============================================================
 # 🎉 ЕЖЕДНЕВНЫЙ БОНУС (VIP, ТОПЫ И Т.Д.)
 # ============================================================
 async def daily_cron_loop():
@@ -1684,7 +1750,11 @@ async def daily_cron_loop():
 
         try:
             async with db_pool.acquire() as conn:
-                top_users = await conn.fetch("SELECT user_id FROM users WHERE is_hidden = FALSE ORDER BY wins DESC LIMIT 3")
+                top_users = await conn.fetch("""
+                    SELECT user_id FROM users 
+                    WHERE (is_hidden IS NULL OR is_hidden = false) 
+                    ORDER BY wins DESC LIMIT 3
+                """)
                 rewards_users = [(25, 100), (15, 50), (10, 25)]
                 for idx, u in enumerate(top_users):
                     if idx < len(rewards_users):
