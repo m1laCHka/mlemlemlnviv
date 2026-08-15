@@ -436,7 +436,6 @@ async def process_gender(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET gender = $1 WHERE user_id = $2", gender, callback.from_user.id)
     
-    # Отправляем аватарку с поздравлением
     try:
         await bot.send_photo(
             callback.from_user.id,
@@ -450,40 +449,70 @@ async def process_gender(callback: CallbackQuery):
     
     await callback.message.delete()
     await callback.message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=get_main_keyboard())
+    await callback.answer()
 
 @router.message(F.text.lower().in_(["помощь", "help", "❓ помощь"]))
 async def cmd_help(message: Message):
     await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=get_main_keyboard())
 
-# ---------------------------------------------------------
-# ОБРАБОТКА КНОПОК ГЛАВНОГО МЕНЮ
-# ---------------------------------------------------------
-@router.message(F.text == "🎰 Рулетка")
-async def btn_roulette(m: Message): await m.answer("🎰 Формат: <code>р красное 100</code> или <code>р 0 50</code>", parse_mode="HTML")
-@router.message(F.text == "🤠 Дуэль")
-async def btn_duel(m: Message): await m.answer("🤠 Напишите в группе: <code>дуэль 100</code>", parse_mode="HTML")
-@router.message(F.text == "🐱 Котики")
-async def btn_cats(m: Message): await m.answer("🐱 Напишите в группе: <code>котики 100</code>", parse_mode="HTML")
-@router.message(F.text == "🎰 Казино")
-async def btn_casino(m: Message): await cmd_casino(m)
-@router.message(F.text == "🎁 Приз")
-async def btn_prize(m: Message): await cmd_prize(m)
-@router.message(F.text == "🏪 Магазин")
-async def btn_shop(m: Message): await cmd_shop(m)
-@router.message(F.text == "👤 Профиль")
-async def btn_profile(m: Message): await cmd_profile(m)
-@router.message(F.text == "📊 Статистика")
-async def btn_stats(m: Message): await cmd_stats(m)
-@router.message(F.text == "⭐ Перевод")
-async def btn_transfer(m: Message): await m.answer("❌ Формат: <code>перевод @username 10</code>", parse_mode="HTML")
-@router.message(F.text == "🏆 Топ")
-async def btn_top(m: Message): await cmd_top(m)
-@router.message(F.text == "💍 Семья")
-async def btn_fam(m: Message): await cmd_family(m)
-@router.message(F.text == "🎯 Квесты")
-async def btn_q(m: Message): await cmd_quests(m)
-@router.message(F.text == "🏆 Турнир")
-async def btn_t(m: Message): await cmd_tournament(m)
+# ============================================================
+# ОБРАБОТКА КНОПОК ГЛАВНОГО МЕНЮ (С ПОДСТРОКОЙ)
+# ============================================================
+@router.message(F.text.contains("Рулетка"))
+async def btn_roulette(m: Message): 
+    await cmd_roulette(m)
+
+@router.message(F.text.contains("Дуэль"))
+async def btn_duel(m: Message): 
+    await m.answer("🤠 Напишите в группе: <code>дуэль 100</code>", parse_mode="HTML")
+
+@router.message(F.text.contains("Котики"))
+async def btn_cats(m: Message): 
+    await m.answer("🐱 Напишите в группе: <code>котики 100</code>", parse_mode="HTML")
+
+@router.message(F.text.contains("Казино"))
+async def btn_casino(m: Message): 
+    await cmd_casino(m)
+
+@router.message(F.text.contains("Приз"))
+async def btn_prize(m: Message): 
+    await cmd_prize(m)
+
+@router.message(F.text.contains("Магазин"))
+async def btn_shop(m: Message): 
+    await cmd_shop(m)
+
+@router.message(F.text.contains("Профиль"))
+async def btn_profile(m: Message): 
+    await cmd_profile(m)
+
+@router.message(F.text.contains("Статистика"))
+async def btn_stats(m: Message): 
+    await cmd_stats(m)
+
+@router.message(F.text.contains("Перевод"))
+async def btn_transfer(m: Message): 
+    await m.answer("❌ Формат: <code>перевод @username 10</code>", parse_mode="HTML")
+
+@router.message(F.text.contains("Топ"))
+async def btn_top(m: Message): 
+    await cmd_top(m)
+
+@router.message(F.text.contains("Семья"))
+async def btn_fam(m: Message): 
+    await cmd_family(m)
+
+@router.message(F.text.contains("Квесты"))
+async def btn_q(m: Message): 
+    await cmd_quests(m)
+
+@router.message(F.text.contains("Турнир"))
+async def btn_t(m: Message): 
+    await cmd_tournament(m)
+
+@router.message(F.text.contains("Помощь"))
+async def btn_help(m: Message): 
+    await cmd_help(m)
 
 # ---------------------------------------------------------
 # ИГРА: РУЛЕТКА (С КНОПКОЙ ОТМЕНЫ)
@@ -524,7 +553,6 @@ async def cmd_roulette(message: Message):
     bet_idx = len(roul["bets"])
     roul["bets"].append({"user_id": user['user_id'], "username": uname, "type": bet_type, "amount": bet_amount, "insurance": user['insurance']})
     
-    # Кнопка отмены ставки
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="❌ Отменить ставку", callback_data=f"cancel_roulette_{chat_id}_{bet_idx}")
     ]])
@@ -770,7 +798,6 @@ async def cmd_cats(message: Message):
 
     active_cats[message.chat.id] = {"count": yellow, "pot": bet, "host_id": user['user_id'], "attempts": {}, "active": True}
     
-    # Кнопка отмены игры
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="❌ Отменить игру (возврат)", callback_data=f"cancel_cats_{message.chat.id}")
     ]])
@@ -869,9 +896,10 @@ async def process_casino(callback: CallbackQuery):
             res = "🔥 <b>ДЖЕКПОТ (1%)!</b> 5000💰 + 50⭐ + VIP на 30 дней!"
         await check_achievements(user['user_id'])
     await callback.message.edit_text(f"🎰 <b>КАЗИНО (-25⭐):</b>\n\n{res}", parse_mode="HTML")
+    await callback.answer()
 
 # ---------------------------------------------------------
-# ПРИЗ
+# ПРИЗ (С ИСПРАВЛЕНИЕМ ДАТЫ)
 # ---------------------------------------------------------
 @router.message(F.text.lower().in_(["приз", "🎁 приз"]))
 async def cmd_prize(message: Message):
@@ -888,7 +916,10 @@ async def cmd_prize(message: Message):
 @router.callback_query(F.data.startswith("chest_"))
 async def process_chest(callback: CallbackQuery):
     user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
-    if user['last_prize_date'] == datetime.date.today(): return
+    if user['last_prize_date'] == datetime.date.today():
+        await callback.answer("Уже сегодня!", show_alert=True)
+        return
+    
     r = random.random()
     if r < 0.30: c, s = 200, 0
     elif r < 0.55: c, s = 500, 0
@@ -897,8 +928,13 @@ async def process_chest(callback: CallbackQuery):
     else: c, s = 1500, 5
 
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET coins = coins + $1, stars = stars + $2, last_prize_date = $3 WHERE user_id = $4", c, s, datetime.date.today(), user['user_id'])
+        # ✅ ИСПРАВЛЕНО: str(datetime.date.today())
+        await conn.execute(
+            "UPDATE users SET coins = coins + $1, stars = stars + $2, last_prize_date = $3 WHERE user_id = $4", 
+            c, s, str(datetime.date.today()), user['user_id']
+        )
     await callback.message.edit_text(f"🎉 <b>Награда получена:</b> +{c}💰 +{s}⭐", parse_mode="HTML")
+    await callback.answer()
 
 # ---------------------------------------------------------
 # МАГАЗИН И ПЕРЕВОДЫ
@@ -1018,7 +1054,7 @@ async def cmd_unhide_profile(message: Message):
 # ---------------------------------------------------------
 # ПРОФИЛЬ И СТАТИСТИКА (С АВАТАРКАМИ)
 # ---------------------------------------------------------
-@router.message(F.text.lower().startswith(("профиль", "п ")))
+@router.message(F.text.contains("Профиль"))
 async def cmd_profile(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     rank = calculate_rank(user['wins'], user['total_games'])
@@ -1119,6 +1155,7 @@ async def cmd_top_families(callback: CallbackQuery):
         name = r['name'] or f"Семья #{r['id']}"
         text += f"{idx}. {name} — {r['score']} очков (с {r['created_at']})\n"
     await callback.message.edit_text(text, parse_mode="HTML")
+    await callback.answer()
 
 @router.callback_query(F.data == "top_tournament")
 async def cmd_top_tournament(callback: CallbackQuery):
@@ -1137,6 +1174,7 @@ async def cmd_top_tournament(callback: CallbackQuery):
             name = r['custom_nick'] or r['username'] or f"Игрок_{r['user_id']}"
             text += f"{idx}. {name} — {r['tournament_score']} очков\n"
     await callback.message.edit_text(text, parse_mode="HTML")
+    await callback.answer()
 
 # ---------------------------------------------------------
 # СЕМЕЙНАЯ СИСТЕМА
@@ -1217,6 +1255,7 @@ async def process_marry(callback: CallbackQuery):
     await callback.message.edit_text("🎉 <b>Семья создана! +5⭐ каждому!</b>", parse_mode="HTML")
     await check_achievements(data["u1"])
     await check_achievements(data["u2"])
+    await callback.answer()
 
 # ---------------------------------------------------------
 # СМЕНА НАЗВАНИЯ СЕМЬИ
@@ -1294,6 +1333,7 @@ async def process_rename(callback: CallbackQuery):
     
     del pending_renames[rename_id]
     await callback.message.edit_text(f"✅ Название семьи успешно изменено на: <b>{rename['new_name']}</b>", parse_mode="HTML")
+    await callback.answer()
 
 # ---------------------------------------------------------
 # РАЗВОД (С ПОДТВЕРЖДЕНИЕМ)
@@ -1331,13 +1371,13 @@ async def process_divorce(callback: CallbackQuery):
                          ban_date, user['user_id'], spouse_id)
 
     await callback.message.edit_text("💔 Бракоразводный процесс завершен. Установлен бан на брак на 7 дней.", parse_mode="HTML")
+    await callback.answer()
 
 # ---------------------------------------------------------
 # УСЫНОВЛЕНИЕ
 # ---------------------------------------------------------
 @router.message(F.text.lower().startswith("ребёнок"))
-async def child_handler(message: Message):
-    ...
+async def cmd_adopt(message: Message):
     if not message.reply_to_message:
         await message.answer("❌ Ответьте на сообщение игрока!", parse_mode="HTML")
         return
@@ -1513,7 +1553,7 @@ async def join_tournament(callback: CallbackQuery):
     await callback.message.edit_text("✅ Вы успешно зарегистрированы в турнире!\nУдачи! 🍀", parse_mode="HTML")
 
 # ---------------------------------------------------------
-# АДМИН-ПАНЕЛЬ
+# АДМИН-ПАНЕЛЬ (ПОЛНАЯ)
 # ---------------------------------------------------------
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
@@ -1527,10 +1567,17 @@ async def cmd_admin(message: Message):
         [InlineKeyboardButton(text="📋 Список промокодов", callback_data="admin_list_promos")],
         [InlineKeyboardButton(text="🗑️ Удалить промокод", callback_data="admin_delete_promo")],
         [InlineKeyboardButton(text="📋 Список пользователей", callback_data="admin_users")],
+        [InlineKeyboardButton(text="🗑️ Удалить профиль", callback_data="admin_delete_user")],
+        [InlineKeyboardButton(text="🔒 Блокировка/Разблокировка", callback_data="admin_ban_user")],
         [InlineKeyboardButton(text="🔍 Проверка БД", callback_data="admin_check_db")]
     ])
     
-    await message.answer("👑 <b>АДМИН-ПАНЕЛЬ</b>\n\nВыберите действие:", parse_mode="HTML", reply_markup=kb)
+    await message.answer(
+        "👑 <b>АДМИН-ПАНЕЛЬ</b>\n\n"
+        "Выберите действие:",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
 
 # ---------------------------------------------------------
 # СТАТИСТИКА БОТА (АДМИН)
@@ -1773,6 +1820,182 @@ async def admin_users(callback: CallbackQuery):
     
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
     await callback.answer()
+
+# ---------------------------------------------------------
+# 🗑️ УДАЛЕНИЕ ПРОФИЛЯ ПОЛЬЗОВАТЕЛЯ
+# ---------------------------------------------------------
+@router.callback_query(F.data == "admin_delete_user")
+async def admin_delete_user_menu(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("""
+            SELECT user_id, username, custom_nick, coins, wins 
+            FROM users 
+            ORDER BY coins DESC 
+            LIMIT 20
+        """)
+    
+    if not users:
+        await callback.message.edit_text("📋 <b>УДАЛЕНИЕ ПРОФИЛЯ</b>\n\nНет пользователей в базе!", parse_mode="HTML")
+        await callback.answer()
+        return
+    
+    buttons = []
+    for u in users:
+        name = u['custom_nick'] or u['username'] or f"ID:{u['user_id']}"
+        btn_text = f"{name} (💰{u['coins']:,} 🏆{u['wins']})"
+        buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"del_user_{u['user_id']}")])
+    
+    buttons.append([InlineKeyboardButton(text="🔙 Назад в админ-панель", callback_data="admin_back")])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    await callback.message.edit_text(
+        "🗑️ <b>УДАЛЕНИЕ ПРОФИЛЯ</b>\n\n"
+        "⚠️ <b>ВНИМАНИЕ!</b> Это действие НЕОБРАТИМО!\n"
+        "Выберите пользователя для удаления:",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("del_user_"))
+async def admin_delete_user(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    user_id = int(callback.data.replace("del_user_", ""))
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ ДА, УДАЛИТЬ", callback_data=f"confirm_del_{user_id}")],
+        [InlineKeyboardButton(text="❌ ОТМЕНА", callback_data="admin_delete_user")]
+    ])
+    
+    await callback.message.edit_text(
+        f"⚠️ <b>ВЫ УВЕРЕНЫ?</b>\n\n"
+        f"Пользователь с ID {user_id} будет ПОЛНОСТЬЮ УДАЛЁН из базы данных!\n"
+        f"Это действие НЕОБРАТИМО!",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("confirm_del_"))
+async def admin_confirm_delete(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    user_id = int(callback.data.replace("confirm_del_", ""))
+    
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute("DELETE FROM achievements WHERE user_id = $1", user_id)
+            await conn.execute("DELETE FROM user_promos WHERE user_id = $1", user_id)
+            await conn.execute("DELETE FROM children WHERE child_id = $1", user_id)
+            
+            family = await conn.fetchrow("SELECT family_id FROM users WHERE user_id = $1", user_id)
+            if family and family['family_id']:
+                spouse = await conn.fetchrow("SELECT spouse_id FROM users WHERE user_id = $1", user_id)
+                if spouse:
+                    await conn.execute("UPDATE users SET family_id = NULL, spouse_id = NULL WHERE user_id = $1", spouse['spouse_id'])
+                await conn.execute("DELETE FROM families WHERE id = $1", family['family_id'])
+            
+            await conn.execute("DELETE FROM users WHERE user_id = $1", user_id)
+        
+        await callback.message.edit_text(
+            f"✅ <b>ПОЛЬЗОВАТЕЛЬ {user_id} УДАЛЁН!</b>\n\n"
+            f"Все данные удалены из базы.",
+            parse_mode="HTML"
+        )
+        await callback.answer("Пользователь удален!", show_alert=True)
+        
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ <b>ОШИБКА!</b>\n\n{str(e)}",
+            parse_mode="HTML"
+        )
+        await callback.answer("Ошибка!", show_alert=True)
+
+# ---------------------------------------------------------
+# 🔒 БЛОКИРОВКА/РАЗБЛОКИРОВКА ПОЛЬЗОВАТЕЛЯ
+# ---------------------------------------------------------
+@router.callback_query(F.data == "admin_ban_user")
+async def admin_ban_user_menu(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("""
+            SELECT user_id, username, custom_nick, coins, is_hidden 
+            FROM users 
+            ORDER BY coins DESC 
+            LIMIT 20
+        """)
+    
+    if not users:
+        await callback.message.edit_text("🔒 <b>БЛОКИРОВКА ПОЛЬЗОВАТЕЛЕЙ</b>\n\nНет пользователей в базе!", parse_mode="HTML")
+        await callback.answer()
+        return
+    
+    buttons = []
+    for u in users:
+        name = u['custom_nick'] or u['username'] or f"ID:{u['user_id']}"
+        status = "🔴 ЗАБЛОКИРОВАН" if u['is_hidden'] else "🟢 АКТИВЕН"
+        btn_text = f"{name} - {status}"
+        buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"ban_toggle_{u['user_id']}")])
+    
+    buttons.append([InlineKeyboardButton(text="🔙 Назад в админ-панель", callback_data="admin_back")])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    await callback.message.edit_text(
+        "🔒 <b>БЛОКИРОВКА/РАЗБЛОКИРОВКА</b>\n\n"
+        "Нажмите на пользователя, чтобы изменить статус:\n"
+        "🟢 АКТИВЕН - может играть\n"
+        "🔴 ЗАБЛОКИРОВАН - не может играть",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("ban_toggle_"))
+async def admin_ban_toggle(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    user_id = int(callback.data.replace("ban_toggle_", ""))
+    
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT is_hidden FROM users WHERE user_id = $1", user_id)
+        if not user:
+            await callback.answer("Пользователь не найден!", show_alert=True)
+            return
+        
+        new_status = not user['is_hidden']
+        await conn.execute("UPDATE users SET is_hidden = $1 WHERE user_id = $2", new_status, user_id)
+        
+        status_text = "ЗАБЛОКИРОВАН 🔴" if new_status else "РАЗБЛОКИРОВАН 🟢"
+        try:
+            await bot.send_message(
+                user_id,
+                f"🔒 <b>ВАШ СТАТУС ИЗМЕНЁН!</b>\n\n"
+                f"Новый статус: {status_text}\n"
+                f"{'Вы не можете участвовать в играх и топах.' if new_status else 'Вы снова можете играть!'}",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        
+        await callback.answer(f"✅ Пользователь {status_text}!", show_alert=True)
+    
+    await admin_ban_user_menu(callback)
 
 # ---------------------------------------------------------
 # ПРОВЕРКА БД (АДМИН)
