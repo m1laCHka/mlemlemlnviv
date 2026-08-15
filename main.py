@@ -1766,7 +1766,7 @@ async def cmd_adopt(message: Message):
 # ---------------------------------------------------------
 # 👨‍👩‍👧‍👦 ИНФОРМАЦИЯ О СЕМЬЕ
 # ---------------------------------------------------------
-@router(message, F.text.lower() == "семья")
+@router.message(F.text.lower() == "семья")
 async def cmd_family(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     if not user['family_id']:
