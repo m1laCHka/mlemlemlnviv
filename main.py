@@ -167,7 +167,8 @@ async def init_db():
             coins BIGINT DEFAULT 0,
             vip_days INT DEFAULT 0,
             max_uses INT DEFAULT 1,
-            uses INT DEFAULT 0
+            uses INT DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW()
         );
 
         CREATE TABLE IF NOT EXISTS user_promos (
@@ -287,31 +288,35 @@ async def init_db():
                 except Exception as e:
                     logging.warning(f"⚠️ Не удалось добавить колонку {col} в families: {e}")
 
-        # Конвертация типов BOOLEAN в users
-        boolean_fields = [
+        # ✅ КОНВЕРТАЦИЯ ТИПОВ - bigint/int -> boolean
+        boolean_columns = [
             'is_hidden', 'is_vip', 'insurance',
             'quest1_done', 'quest2_done', 'quest3_done',
             'quest4_done', 'quest5_done', 'quest_bonus_claimed',
             'tournament_fee_paid'
         ]
-        
-        for field in boolean_fields:
+
+        for col in boolean_columns:
             try:
                 col_info = await conn.fetchrow("""
                     SELECT data_type 
                     FROM information_schema.columns 
                     WHERE table_name = 'users' AND column_name = $1
-                """, field)
+                """, col)
                 
-                if col_info and col_info['data_type'] != 'boolean':
-                    await conn.execute(f"""
-                        ALTER TABLE users 
-                        ALTER COLUMN {field} TYPE BOOLEAN 
-                        USING {field}::BOOLEAN
-                    """)
-                    logging.info(f"✅ Колонка {field} сконвертирована в BOOLEAN")
+                if col_info:
+                    data_type = col_info['data_type']
+                    if data_type in ['integer', 'bigint']:
+                        await conn.execute(f"""
+                            ALTER TABLE users 
+                            ALTER COLUMN {col} TYPE BOOLEAN 
+                            USING CASE WHEN {col} = 0 THEN FALSE ELSE TRUE END
+                        """)
+                        logging.info(f"✅ Колонка {col} сконвертирована из {data_type} в BOOLEAN")
+                    elif data_type == 'boolean':
+                        logging.info(f"✅ Колонка {col} уже BOOLEAN")
             except Exception as e:
-                logging.info(f"Конвертация {field} не требуется: {e}")
+                logging.warning(f"⚠️ Не удалось сконвертировать {col}: {e}")
 
         logging.info("✅ База данных инициализирована!")
 
@@ -515,7 +520,7 @@ async def daily_cron_loop():
                 # ============================================
                 top_users = await conn.fetch("""
                     SELECT user_id FROM users 
-                    WHERE (is_hidden IS NULL OR is_hidden = false) 
+                    WHERE COALESCE(is_hidden, 0) = 0
                     ORDER BY wins DESC LIMIT 3
                 """)
                 rewards_users = [(25, 100), (15, 50), (10, 25)]
@@ -1525,7 +1530,7 @@ async def cmd_top(message: Message):
         rows = await conn.fetch("""
             SELECT user_id, username, custom_nick, wins, coins 
             FROM users 
-            WHERE (is_hidden IS NULL OR is_hidden = false)
+            WHERE COALESCE(is_hidden, 0) = 0
             ORDER BY wins DESC 
             LIMIT 10
         """)
@@ -2016,12 +2021,288 @@ async def cmd_use_promo(message: Message, command: CommandObject):
     await message.answer(f"🎉 <b>Промокод активирован! +{p['coins']}💰 +{p['stars']}⭐!</b>", parse_mode="HTML")
 
 # ============================================================
-# 🔍 ДИАГНОСТИКА (АДМИН)
+# 👑 АДМИН-ПАНЕЛЬ
 # ============================================================
-@router.message(Command("check_db"))
-async def cmd_check_db(message: Message):
+
+# Главное меню админа
+@router.message(Command("admin"))
+async def cmd_admin(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У вас нет доступа к админ-панели!", parse_mode="HTML")
+        return
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Статистика бота", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="🎫 Создать промокод", callback_data="admin_create_promo")],
+        [InlineKeyboardButton(text="📋 Список промокодов", callback_data="admin_list_promos")],
+        [InlineKeyboardButton(text="🗑️ Удалить промокод", callback_data="admin_delete_promo")],
+        [InlineKeyboardButton(text="📋 Список пользователей", callback_data="admin_users")],
+        [InlineKeyboardButton(text="🔍 Проверка БД", callback_data="admin_check_db")]
+    ])
+    
+    await message.answer(
+        "👑 <b>АДМИН-ПАНЕЛЬ</b>\n\n"
+        "Выберите действие:",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+# ============================================================
+# 📊 СТАТИСТИКА БОТА
+# ============================================================
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    async with db_pool.acquire() as conn:
+        # Основная статистика
+        users_count = await conn.fetchval("SELECT COUNT(*) FROM users")
+        families_count = await conn.fetchval("SELECT COUNT(*) FROM families")
+        achievements_count = await conn.fetchval("SELECT COUNT(*) FROM achievements")
+        promos_count = await conn.fetchval("SELECT COUNT(*) FROM promos")
+        
+        # Экономика
+        total_coins = await conn.fetchval("SELECT COALESCE(SUM(coins), 0) FROM users")
+        total_stars = await conn.fetchval("SELECT COALESCE(SUM(stars), 0) FROM users")
+        avg_coins = await conn.fetchval("SELECT COALESCE(AVG(coins), 0) FROM users")
+        avg_stars = await conn.fetchval("SELECT COALESCE(AVG(stars), 0) FROM users")
+        
+        # VIP статистика
+        vip_count = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_vip = TRUE")
+        
+        # Активность (за последние 7 дней)
+        week_ago = datetime.date.today() - datetime.timedelta(days=7)
+        active_users = await conn.fetchval(
+            "SELECT COUNT(*) FROM users WHERE last_active_date >= $1", week_ago
+        )
+        
+        # Игровая статистика
+        total_games = await conn.fetchval("SELECT COALESCE(SUM(total_games), 0) FROM users")
+        total_wins = await conn.fetchval("SELECT COALESCE(SUM(wins), 0) FROM users")
+        
+        text = f"""📊 <b>СТАТИСТИКА БОТА</b>
+
+━━━━━━━━━━━━━━━━━━━
+👥 <b>ПОЛЬЗОВАТЕЛИ</b>
+👤 Всего: {users_count}
+👑 VIP: {vip_count}
+📅 Активных за 7 дней: {active_users}
+
+━━━━━━━━━━━━━━━━━━━
+💰 <b>ЭКОНОМИКА</b>
+💎 Всего монет: {total_coins:,}
+⭐ Всего звёзд: {total_stars:,}
+📊 Среднее монет: {avg_coins:.0f}
+📊 Среднее звёзд: {avg_stars:.0f}
+
+━━━━━━━━━━━━━━━━━━━
+🎮 <b>ИГРОВАЯ СТАТИСТИКА</b>
+🎯 Всего игр: {total_games:,}
+🏆 Всего побед: {total_wins:,}
+📈 Процент побед: {round(total_wins/total_games*100, 1) if total_games > 0 else 0}%
+
+━━━━━━━━━━━━━━━━━━━
+🏠 <b>СОЦИАЛКА</b>
+💍 Семей: {families_count}
+🏆 Ачивок: {achievements_count}
+🎫 Промокодов: {promos_count}
+"""
+    
+    await callback.message.edit_text(text, parse_mode="HTML")
+    await callback.answer()
+
+# ============================================================
+# 🎫 СОЗДАТЬ ПРОМОКОД
+# ============================================================
+@router.callback_query(F.data == "admin_create_promo")
+async def admin_create_promo_menu(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        "🎫 <b>СОЗДАНИЕ ПРОМОКОДА</b>\n\n"
+        "Отправьте сообщение в формате:\n"
+        "<code>КОД ЗВЕЗДЫ МОНЕТЫ</code>\n\n"
+        "Пример:\n"
+        "<code>HAPPY2026 50 1000</code>\n\n"
+        "⏳ Ожидаю ввода...",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+# Обработчик ввода промокода
+@router.message(F.text.regexp(r'^[A-Za-z0-9_]+ \d+ \d+$'))
+async def admin_create_promo_handler(message: Message):
     if message.from_user.id != ADMIN_ID:
         await message.answer("❌ У вас нет прав!", parse_mode="HTML")
+        return
+    
+    try:
+        code, stars, coins = message.text.split()
+        stars = int(stars)
+        coins = int(coins)
+        
+        async with db_pool.acquire() as conn:
+            # Проверяем, существует ли уже такой промокод
+            existing = await conn.fetchval("SELECT code FROM promos WHERE code = $1", code)
+            if existing:
+                await message.answer(f"❌ Промокод <b>{code}</b> уже существует!", parse_mode="HTML")
+                return
+            
+            await conn.execute("""
+                INSERT INTO promos (code, stars, coins, max_uses) 
+                VALUES ($1, $2, $3, 100)
+            """, code, stars, coins)
+        
+        await message.answer(
+            f"✅ <b>ПРОМОКОД СОЗДАН!</b>\n\n"
+            f"📌 Код: <code>{code}</code>\n"
+            f"⭐ Звёзд: +{stars}\n"
+            f"💰 Монет: +{coins}\n"
+            f"📊 Макс. использований: 100",
+            parse_mode="HTML"
+        )
+        
+        # Возвращаем в админ-панель
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад в админ-панель", callback_data="admin_back")]
+        ])
+        await message.answer("👑 Вернуться в админ-панель:", reply_markup=kb)
+        
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}", parse_mode="HTML")
+
+# ============================================================
+# 📋 СПИСОК ПРОМОКОДОВ
+# ============================================================
+@router.callback_query(F.data == "admin_list_promos")
+async def admin_list_promos(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    async with db_pool.acquire() as conn:
+        promos = await conn.fetch("""
+            SELECT code, stars, coins, uses, max_uses, created_at 
+            FROM promos 
+            ORDER BY created_at DESC 
+            LIMIT 20
+        """)
+    
+    if not promos:
+        text = "📋 <b>СПИСОК ПРОМОКОДОВ</b>\n\nНет созданных промокодов"
+    else:
+        text = "📋 <b>СПИСОК ПРОМОКОДОВ</b>\n\n"
+        for p in promos:
+            text += f"📌 <code>{p['code']}</code>\n"
+            text += f"   ⭐ +{p['stars']} | 💰 +{p['coins']}\n"
+            text += f"   📊 {p['uses']}/{p['max_uses']} использований\n\n"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад в админ-панель", callback_data="admin_back")]
+    ])
+    
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await callback.answer()
+
+# ============================================================
+# 🗑️ УДАЛИТЬ ПРОМОКОД
+# ============================================================
+@router.callback_query(F.data == "admin_delete_promo")
+async def admin_delete_promo_menu(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    async with db_pool.acquire() as conn:
+        promos = await conn.fetch("SELECT code, stars, coins, uses FROM promos ORDER BY created_at DESC LIMIT 20")
+    
+    if not promos:
+        await callback.message.edit_text(
+            "🗑️ <b>УДАЛЕНИЕ ПРОМОКОДА</b>\n\nНет промокодов для удаления",
+            parse_mode="HTML"
+        )
+        await callback.answer()
+        return
+    
+    # Создаем кнопки для каждого промокода
+    buttons = []
+    for p in promos:
+        btn_text = f"{p['code']} (+{p['stars']}⭐ +{p['coins']}💰) [{p['uses']} использований]"
+        buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"delete_promo_{p['code']}")])
+    
+    buttons.append([InlineKeyboardButton(text="🔙 Назад в админ-панель", callback_data="admin_back")])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    await callback.message.edit_text(
+        "🗑️ <b>УДАЛЕНИЕ ПРОМОКОДА</b>\n\n"
+        "Выберите промокод для удаления:",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("delete_promo_"))
+async def admin_delete_promo(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    code = callback.data.replace("delete_promo_", "")
+    
+    async with db_pool.acquire() as conn:
+        # Удаляем промокод
+        await conn.execute("DELETE FROM promos WHERE code = $1", code)
+        
+        # Удаляем записи об использовании
+        await conn.execute("DELETE FROM user_promos WHERE code = $1", code)
+    
+    await callback.answer(f"✅ Промокод {code} удален!", show_alert=True)
+    
+    # Возвращаемся к списку промокодов
+    await admin_delete_promo_menu(callback)
+
+# ============================================================
+# 📋 СПИСОК ПОЛЬЗОВАТЕЛЕЙ
+# ============================================================
+@router.callback_query(F.data == "admin_users")
+async def admin_users(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("""
+            SELECT user_id, username, custom_nick, coins, stars, wins, total_games 
+            FROM users 
+            ORDER BY coins DESC 
+            LIMIT 20
+        """)
+    
+    text = "📋 <b>ТОП-20 ПОЛЬЗОВАТЕЛЕЙ ПО МОНЕТАМ</b>\n\n"
+    for idx, u in enumerate(users, 1):
+        name = u['custom_nick'] or u['username'] or f"ID:{u['user_id']}"
+        text += f"{idx}. {name}\n"
+        text += f"   💰 {u['coins']:,} | ⭐ {u['stars']} | 🏆 {u['wins']} побед\n\n"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад в админ-панель", callback_data="admin_back")]
+    ])
+    
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await callback.answer()
+
+# ============================================================
+# 🔍 ПРОВЕРКА БД
+# ============================================================
+@router.callback_query(F.data == "admin_check_db")
+async def admin_check_db(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
         return
     
     async with db_pool.acquire() as conn:
@@ -2032,14 +2313,45 @@ async def cmd_check_db(message: Message):
             AND column_name IN ('is_hidden', 'is_vip', 'insurance', 'quest1_done', 'gender')
         """)
         
-        text = "📊 <b>Типы колонок в БД:</b>\n\n"
+        text = "🔍 <b>ПРОВЕРКА БД</b>\n\n"
+        text += "📌 <b>Типы колонок в таблице users:</b>\n\n"
         for col in columns:
             text += f"📌 {col['column_name']}: {col['data_type']}\n"
         
-        count = await conn.fetchval("SELECT COUNT(*) FROM users")
-        text += f"\n👥 Всего пользователей: {count}"
+        # Проверяем таблицы
+        tables = await conn.fetch("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+        """)
         
-        await message.answer(text, parse_mode="HTML")
+        text += "\n📌 <b>Таблицы в БД:</b>\n"
+        for t in tables:
+            text += f"📊 {t['table_name']}\n"
+        
+        # Количество записей в таблицах
+        for t in tables:
+            count = await conn.fetchval(f"SELECT COUNT(*) FROM {t['table_name']}")
+            text += f"   📊 {t['table_name']}: {count} записей\n"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад в админ-панель", callback_data="admin_back")]
+    ])
+    
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await callback.answer()
+
+# ============================================================
+# 🔙 НАЗАД В АДМИН-ПАНЕЛЬ
+# ============================================================
+@router.callback_query(F.data == "admin_back")
+async def admin_back(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("❌ У вас нет прав!", show_alert=True)
+        return
+    
+    await cmd_admin(callback.message)
+    await callback.answer()
 
 # ============================================================
 # 🚀 ЗАПУСК
