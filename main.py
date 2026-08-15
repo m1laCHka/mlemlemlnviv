@@ -182,6 +182,74 @@ async def init_db():
         );
         """)
 
+        # ✅ ПРОВЕРЯЕМ И ДОБАВЛЯЕМ НЕДОСТАЮЩИЕ КОЛОНКИ
+        # Получаем список существующих колонок
+        existing_columns = await conn.fetch("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'users'
+        """)
+        existing_cols = {row['column_name'] for row in existing_columns}
+
+        # Список всех колонок которые должны быть в таблице
+        required_columns = {
+            'user_id', 'username', 'custom_nick', 'custom_emoji', 'gender',
+            'coins', 'stars', 'is_vip', 'vip_until', 'is_hidden', 'insurance',
+            'family_id', 'spouse_id', 'divorce_until', 'daily_stars_transferred',
+            'last_transfer_date', 'last_prize_date', 'wins', 'losses', 'total_games',
+            'total_coins_won', 'daily_net_win', 'streak_days', 'last_active_date',
+            'last_game_result', 'top3_family_count', 'roulette_games', 'roulette_wins',
+            'duel_games', 'duel_wins', 'cat_games', 'cat_wins', 'casino_games',
+            'casino_wins', 'quests_completed', 'quest1', 'quest2', 'quest3', 'quest4',
+            'quest5', 'quest1_done', 'quest2_done', 'quest3_done', 'quest4_done',
+            'quest5_done', 'quest_bonus_claimed', 'tournament_wins',
+            'tournament_fee_paid', 'tournament_score'
+        }
+
+        # Добавляем недостающие колонки
+        for col in required_columns:
+            if col not in existing_cols:
+                try:
+                    # Определяем тип колонки
+                    if col in ['user_id', 'coins', 'daily_stars_transferred', 'wins', 'losses', 
+                              'total_games', 'total_coins_won', 'daily_net_win', 'streak_days',
+                              'top3_family_count', 'roulette_games', 'roulette_wins',
+                              'duel_games', 'duel_wins', 'cat_games', 'cat_wins',
+                              'casino_games', 'casino_wins', 'quests_completed',
+                              'quest1', 'quest2', 'quest3', 'quest4', 'quest5',
+                              'tournament_wins', 'tournament_score', 'family_id']:
+                        col_type = 'BIGINT'
+                        default = '0'
+                    elif col in ['stars']:
+                        col_type = 'INT'
+                        default = '0'
+                    elif col in ['gender', 'username', 'custom_nick', 'custom_emoji', 
+                                'last_game_result']:
+                        col_type = 'VARCHAR(255)'
+                        default = "''"
+                    elif col in ['vip_until']:
+                        col_type = 'TIMESTAMP'
+                        default = 'NULL'
+                    elif col in ['divorce_until', 'last_transfer_date', 'last_prize_date',
+                                'last_active_date']:
+                        col_type = 'DATE'
+                        default = 'NULL'
+                    elif col in ['is_vip', 'is_hidden', 'insurance', 'quest1_done',
+                                'quest2_done', 'quest3_done', 'quest4_done', 'quest5_done',
+                                'quest_bonus_claimed', 'tournament_fee_paid']:
+                        col_type = 'BOOLEAN'
+                        default = 'FALSE'
+                    else:
+                        col_type = 'VARCHAR(255)'
+                        default = "''"
+
+                    await conn.execute(f"""
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {col_type} DEFAULT {default}
+                    """)
+                    logging.info(f"✅ Добавлена колонка: {col} ({col_type})")
+                except Exception as e:
+                    logging.warning(f"⚠️ Не удалось добавить колонку {col}: {e}")
+
         # ✅ КОНВЕРТАЦИЯ ТИПОВ ДЛЯ СУЩЕСТВУЮЩИХ ДАННЫХ
         boolean_fields = [
             'is_hidden', 'is_vip', 'insurance',
@@ -192,32 +260,24 @@ async def init_db():
         
         for field in boolean_fields:
             try:
-                await conn.execute(f"""
-                    ALTER TABLE users 
-                    ALTER COLUMN {field} TYPE BOOLEAN 
-                    USING {field}::BOOLEAN
-                """)
-                logging.info(f"✅ Колонка {field} сконвертирована в BOOLEAN")
+                # Проверяем тип колонки
+                col_info = await conn.fetchrow("""
+                    SELECT data_type 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name = $1
+                """, field)
+                
+                if col_info and col_info['data_type'] != 'boolean':
+                    await conn.execute(f"""
+                        ALTER TABLE users 
+                        ALTER COLUMN {field} TYPE BOOLEAN 
+                        USING {field}::BOOLEAN
+                    """)
+                    logging.info(f"✅ Колонка {field} сконвертирована в BOOLEAN")
             except Exception as e:
                 logging.info(f"Конвертация {field} не требуется: {e}")
 
         logging.info("✅ База данных инициализирована!")
-
-async def get_or_create_user(user_id: int, username: Optional[str]) -> dict:
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
-        today = datetime.date.today()
-        if not row:
-            await conn.execute(
-                "INSERT INTO users (user_id, username, last_active_date) VALUES ($1, $2, $3)",
-                user_id, username or f"Игрок_{user_id}", today
-            )
-            row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
-        else:
-            if username and row['username'] != username:
-                await conn.execute("UPDATE users SET username = $1 WHERE user_id = $2", username, user_id)
-                row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
-        return dict(row)
 
 # ---------------------------------------------------------
 # РАНГИ И ТИТУЛЫ
