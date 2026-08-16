@@ -58,7 +58,7 @@ async def start_web_server():
     logging.info(f"🌐 Веб-сервер запущен на порту {PORT}")
 
 # ---------------------------------------------------------
-# ГЛАВНАЯ КЛАВИАТУРА (БЕЗ ЭМОДЗИ)
+# ГЛАВНАЯ КЛАВИАТУРА
 # ---------------------------------------------------------
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     kb = [
@@ -451,7 +451,7 @@ async def cmd_help(message: Message):
     await message.answer(HELP_TEXT, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 # ============================================================
-# 📱 ОБРАБОТКА КНОПОК ГЛАВНОГО МЕНЮ (БЕЗ ЭМОДЗИ)
+# 📱 ОБРАБОТКА КНОПОК ГЛАВНОГО МЕНЮ
 # ============================================================
 @router.message(F.text == "Рулетка")
 async def btn_roulette(m: Message): 
@@ -1210,7 +1210,7 @@ async def process_chest(callback: CallbackQuery):
     await callback.message.edit_text(f"🎉 <b>Награда получена:</b> +{c}💰 +{s}⭐", parse_mode="HTML")
 
 # ---------------------------------------------------------
-# 🏪 МАГАЗИН
+# 🏪 МАГАЗИН (С ВЫБОРОМ КОЛИЧЕСТВА ЗВЁЗД ДЛЯ ОБМЕНА)
 # ---------------------------------------------------------
 @router.message(F.text.lower().in_(["магазин", "🏪 магазин"]))
 async def cmd_shop(message: Message):
@@ -1228,7 +1228,7 @@ async def cmd_shop(message: Message):
         [InlineKeyboardButton(text="👑 VIP 1д (5⭐)", callback_data="buy_vip_1"), 
          InlineKeyboardButton(text="👑 VIP 7д (30⭐)", callback_data="buy_vip_7")],
         [InlineKeyboardButton(text="🛡️ Страховка (5⭐)", callback_data="buy_ins"), 
-         InlineKeyboardButton(text="💱 1⭐→50💰", callback_data="buy_ex")]
+         InlineKeyboardButton(text="💱 Обмен звёзд", callback_data="buy_ex")]
     ])
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
@@ -1236,6 +1236,55 @@ async def cmd_shop(message: Message):
 async def process_shop(callback: CallbackQuery):
     await callback.answer()
     user = await get_or_create_user(callback.from_user.id, callback.from_user.username)
+    
+    # Обработка обмена звёзд
+    if callback.data == "buy_ex":
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="1⭐ → 50💰", callback_data="exchange_1")],
+            [InlineKeyboardButton(text="5⭐ → 250💰", callback_data="exchange_5")],
+            [InlineKeyboardButton(text="10⭐ → 500💰", callback_data="exchange_10")],
+            [InlineKeyboardButton(text="25⭐ → 1250💰", callback_data="exchange_25")],
+            [InlineKeyboardButton(text="50⭐ → 2500💰", callback_data="exchange_50")],
+            [InlineKeyboardButton(text="🔙 Назад в магазин", callback_data="buy_back")]
+        ])
+        await callback.message.edit_text(
+            f"💱 <b>ОБМЕН ЗВЁЗД НА МОНЕТЫ</b>\n\n"
+            f"⭐ Ваш баланс: {user['stars']} звёзд\n"
+            f"💰 Ваш баланс: {user['coins']} монет\n\n"
+            "Выберите количество звёзд для обмена:",
+            parse_mode="HTML",
+            reply_markup=kb
+        )
+        return
+    
+    # Обработка выбора количества
+    if callback.data.startswith("exchange_"):
+        amount = int(callback.data.replace("exchange_", ""))
+        if user['stars'] < amount:
+            await callback.message.answer(f"❌ У вас только {user['stars']}⭐, а нужно {amount}⭐!", parse_mode="HTML")
+            return
+        
+        coins = amount * 50
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE users SET stars = stars - $1, coins = coins + $2 WHERE user_id = $3", amount, coins, user['user_id'])
+        
+        await callback.message.edit_text(
+            f"✅ <b>ОБМЕН ВЫПОЛНЕН!</b>\n\n"
+            f"➖ {amount}⭐ списано\n"
+            f"➕ {coins}💰 получено\n\n"
+            f"⭐ Осталось звёзд: {user['stars'] - amount}\n"
+            f"💰 Всего монет: {user['coins'] + coins}",
+            parse_mode="HTML"
+        )
+        await callback.answer(f"✅ Обменяно {amount}⭐ на {coins}💰!", show_alert=True)
+        return
+    
+    # Возврат в магазин
+    if callback.data == "buy_back":
+        await cmd_shop(callback.message)
+        return
+    
+    # Остальные покупки
     async with db_pool.acquire() as conn:
         if callback.data == "buy_vip_1" and user['stars'] >= 5:
             vip_until = datetime.datetime.utcnow() + datetime.timedelta(days=1)
@@ -1248,9 +1297,6 @@ async def process_shop(callback: CallbackQuery):
         elif callback.data == "buy_ins" and user['stars'] >= 5:
             await conn.execute("UPDATE users SET stars = stars - 5, insurance = TRUE WHERE user_id = $1", user['user_id'])
             await callback.message.answer("✅ Страховка куплена!", parse_mode="HTML")
-        elif callback.data == "buy_ex" and user['stars'] >= 1:
-            await conn.execute("UPDATE users SET stars = stars - 1, coins = coins + 50 WHERE user_id = $1", user['user_id'])
-            await callback.message.answer("✅ Обменено 1⭐ на 50💰!", parse_mode="HTML")
         else:
             await callback.message.answer("❌ Недостаточно звёзд!", parse_mode="HTML")
 
@@ -1338,35 +1384,50 @@ async def cmd_unhide_profile(message: Message):
     await message.answer("🔓 Ваш профиль открыт!", parse_mode="HTML")
 
 # ---------------------------------------------------------
-# 👤 ПРОФИЛЬ
+# 👤 ПРОФИЛЬ (ИСПРАВЛЕН)
 # ---------------------------------------------------------
+@router.message(F.text == "Профиль")
+async def btn_profile_direct(m: Message): 
+    await cmd_profile(m)
+
+@router.message(F.text == "профиль")
+async def btn_profile_lower(m: Message): 
+    await cmd_profile(m)
+
 @router.message(F.text.lower().startswith(("профиль", "п ")))
 async def cmd_profile(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    rank = calculate_rank(user['wins'], user['total_games'])
-    dname = user['custom_nick'] or user['username'] or f"Игрок_{user['user_id']}"
+    
+    if not user:
+        user = await get_or_create_user(message.from_user.id, message.from_user.username)
+        if not user:
+            await message.answer("❌ Ошибка! Попробуйте позже.", parse_mode="HTML")
+            return
+    
+    rank = calculate_rank(user.get('wins', 0), user.get('total_games', 0))
+    dname = user.get('custom_nick') or user.get('username') or f"Игрок_{user['user_id']}"
 
     family_info = ""
-    if user['family_id']:
+    if user.get('family_id'):
         async with db_pool.acquire() as conn:
             fam = await conn.fetchrow("SELECT name, score FROM families WHERE id = $1", user['family_id'])
             if fam: 
-                fname = fam['name'] if fam['name'] else f"Семья #{user['family_id']}"
-                family_info = f"\n💍 Семья: {fname} (Очки: {fam['score']})"
+                fname = fam.get('name') if fam.get('name') else f"Семья #{user['family_id']}"
+                family_info = f"\n💍 Семья: {fname} (Очки: {fam.get('score', 0)})"
 
     titles = await get_user_titles(user)
     titles_str = ", ".join(titles) if titles else "Нет"
     
-    vip_status = "👑 VIP" if user['is_vip'] and (not user['vip_until'] or user['vip_until'] > datetime.datetime.utcnow()) else "Обычный"
-    if user['vip_until'] and user['vip_until'] > datetime.datetime.utcnow():
+    vip_status = "👑 VIP" if user.get('is_vip') and (not user.get('vip_until') or user['vip_until'] > datetime.datetime.utcnow()) else "Обычный"
+    if user.get('vip_until') and user['vip_until'] > datetime.datetime.utcnow():
         days_left = (user['vip_until'] - datetime.datetime.utcnow()).days
         vip_status += f" (осталось {days_left}д)"
 
     games_data = [
-        ("🎰 Рулетка", user['roulette_wins'], user['roulette_games']),
-        ("🤠 Дуэль", user['duel_wins'], user['duel_games']),
-        ("🐱 Котики", user['cat_wins'], user['cat_games']),
-        ("🎰 Казино", user['casino_wins'], user['casino_games']),
+        ("🎰 Рулетка", user.get('roulette_wins', 0), user.get('roulette_games', 0)),
+        ("🤠 Дуэль", user.get('duel_wins', 0), user.get('duel_games', 0)),
+        ("🐱 Котики", user.get('cat_wins', 0), user.get('cat_games', 0)),
+        ("🎰 Казино", user.get('casino_wins', 0), user.get('casino_games', 0)),
     ]
 
     stats_text = ""
@@ -1386,14 +1447,14 @@ async def cmd_profile(message: Message):
     text = f"""👤 <b>Профиль:</b> {dname}
 🎖️ Ранг: {rank}
 💳 Статус: {vip_status}
-💰 Монеты: {user['coins']:,}
-⭐ Звёзды: {user['stars']}
+💰 Монеты: {user.get('coins', 0):,}
+⭐ Звёзды: {user.get('stars', 0)}
 🎖️ Титулы: {titles_str}{family_info}
 ━━━━━━━━━━━━━━━━━
 📈 Статистика по играм:
 {stats_text}
 🏆 Лучшая игра: {best_game} ({best_ratio}%)
-🏟️ Турнирные очки: {user['tournament_score']}"""
+🏟️ Турнирные очки: {user.get('tournament_score', 0)}"""
 
     await message.answer(text, parse_mode="HTML")
 
@@ -2004,22 +2065,30 @@ async def cmd_create_promo(message: Message, command: CommandObject):
         return
     
     if not command.args:
-        await message.answer("Формат: /create_promo КОД ЗВЕЗДЫ МОНЕТЫ", parse_mode="HTML")
+        await message.answer("❌ Формат: /create_promo КОД ЗВЕЗДЫ МОНЕТЫ\n\nПример:\n<code>/create_promo WELCOME 50 1000</code>", parse_mode="HTML")
         return
     
     args = command.args.split()
     if len(args) < 3:
-        await message.answer("Формат: /create_promo КОД ЗВЕЗДЫ МОНЕТЫ", parse_mode="HTML")
+        await message.answer("❌ Формат: /create_promo КОД ЗВЕЗДЫ МОНЕТЫ\n\nПример:\n<code>/create_promo WELCOME 50 1000</code>", parse_mode="HTML")
         return
     
     code, stars, coins = args[0], int(args[1]), int(args[2])
+    
+    if not code or len(code) < 2:
+        await message.answer("❌ Код должен содержать минимум 2 символа!", parse_mode="HTML")
+        return
+    
     async with db_pool.acquire() as conn:
         existing = await conn.fetchval("SELECT code FROM promos WHERE code = $1", code)
         if existing:
             await message.answer(f"❌ Промокод <b>{code}</b> уже существует!", parse_mode="HTML")
             return
         
-        await conn.execute("INSERT INTO promos (code, stars, coins, max_uses) VALUES ($1, $2, $3, 100)", code, stars, coins)
+        await conn.execute(
+            "INSERT INTO promos (code, stars, coins, max_uses) VALUES ($1, $2, $3, 100)", 
+            code, stars, coins
+        )
     
     await message.answer(
         f"✅ <b>ПРОМОКОД СОЗДАН!</b>\n\n"
@@ -2040,13 +2109,20 @@ async def admin_create_promo_handler(message: Message):
         stars = int(stars)
         coins = int(coins)
         
+        if not code or len(code) < 2:
+            await message.answer("❌ Код должен содержать минимум 2 символа!", parse_mode="HTML")
+            return
+        
         async with db_pool.acquire() as conn:
             existing = await conn.fetchval("SELECT code FROM promos WHERE code = $1", code)
             if existing:
                 await message.answer(f"❌ Промокод <b>{code}</b> уже существует!", parse_mode="HTML")
                 return
             
-            await conn.execute("INSERT INTO promos (code, stars, coins, max_uses) VALUES ($1, $2, $3, 100)", code, stars, coins)
+            await conn.execute(
+                "INSERT INTO promos (code, stars, coins, max_uses) VALUES ($1, $2, $3, 100)", 
+                code, stars, coins
+            )
         
         await message.answer(
             f"✅ <b>ПРОМОКОД СОЗДАН!</b>\n\n"
@@ -2080,9 +2156,11 @@ async def admin_list_promos(callback: CallbackQuery):
         for p in promos:
             text += f"📌 <code>{p['code']}</code>\n"
             text += f"   ⭐ +{p['stars']} | 💰 +{p['coins']}\n"
-            text += f"   📊 {p['uses']}/{p['max_uses']} использований\n\n"
+            text += f"   📊 {p['uses']}/{p['max_uses']} использований\n"
+            text += f"   📅 {p['created_at'].strftime('%d.%m.%Y %H:%M')}\n\n"
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑️ Удалить промокод", callback_data="admin_delete_promo")],
         [InlineKeyboardButton(text="🔙 Назад в админ-панель", callback_data="admin_back")]
     ])
     
